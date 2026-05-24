@@ -1,0 +1,37 @@
+{
+  "name": "qiaomu-music-player-web",
+  "version": "1.0.0",
+  "private": false,
+  "description": "Self-hosted web radio and admin shelf for AI-generated music.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:server": "node server.js",
+    "start": "node server.js",
+    "build": "vite build && node scripts/check.js",
+    "check": "tsc --noEmit && node --check server.js",
+    "capture:screenshots": "node scripts/capture-screenshots.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@nafr/echo-ui": "^1.0.0",
+    "clsx": "^2.1.1",
+    "d3": "^7.9.0",
+    "lucide-react": "^1.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.4.0",
+    "tailwind-variants": "^3.2.2",
+    "tone": "^14.9.17"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.21",
+    "playwright": "^1.60.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.18",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  }
+}

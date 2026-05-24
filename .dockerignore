@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.DS_Store
+*.log
+.env
+.env.*
+data/music/*
+data/covers/*
+data/tracks.json
+suno-jobs

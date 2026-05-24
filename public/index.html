@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Qiaomu Music</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <aside class="rail" aria-label="导航">
+        <div class="brand">
+          <span class="brand-mark">Q</span>
+          <div>
+            <strong>Qiaomu Music</strong>
+            <span>music.qiaomu.ai</span>
+          </div>
+        </div>
+        <button class="rail-item active" data-view="radio" title="电台">♫</button>
+        <button class="rail-item" data-view="admin" title="后台">⚙</button>
+      </aside>
+
+      <section class="radio-view" id="radioView">
+        <section class="hero">
+          <div class="cover-wrap">
+            <img id="coverImage" class="cover-image" alt="">
+            <div class="cover-fallback" id="coverFallback">QM</div>
+          </div>
+          <div class="hero-meta">
+            <p class="eyebrow" id="nowSource">Qiaomu Radio</p>
+            <h1 id="nowTitle">乔木音乐电台</h1>
+            <p id="nowArtist">正在准备播放</p>
+            <div class="controls">
+              <button class="control main" id="playButton" title="播放/暂停">▶</button>
+              <button class="control" id="prevButton" title="上一首">⏮</button>
+              <button class="control" id="nextButton" title="下一首">⏭</button>
+              <button class="control" id="shuffleButton" title="随机播放">⇄</button>
+              <button class="control" id="repeatButton" title="循环播放">↻</button>
+            </div>
+            <div class="progress">
+              <span id="currentTime">0:00</span>
+              <input id="seekBar" type="range" min="0" max="1000" value="0" aria-label="播放进度">
+              <span id="duration">0:00</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <article class="lyrics-card">
+            <div class="section-head">
+              <h2>歌词</h2>
+              <span id="autoplayState">Radio</span>
+            </div>
+            <pre id="lyricsBox">选择一首歌后显示歌词。</pre>
+          </article>
+
+          <aside class="queue-card">
+            <div class="section-head">
+              <h2>播放队列</h2>
+              <span id="trackCount">0</span>
+            </div>
+            <div id="playlist" class="playlist"></div>
+          </aside>
+        </section>
+      </section>
+
+      <section class="admin-view hidden" id="adminView">
+        <div class="admin-header">
+          <div>
+            <p class="eyebrow">Admin</p>
+            <h1>歌曲管理</h1>
+          </div>
+          <button id="logoutButton" class="ghost hidden">退出</button>
+        </div>
+
+        <form id="loginForm" class="login-card">
+          <input id="passwordInput" type="password" placeholder="后台密码">
+          <button>登录</button>
+        </form>
+
+        <div id="adminPanel" class="admin-panel hidden">
+          <form id="uploadForm" class="editor">
+            <div class="form-row">
+              <input name="title" placeholder="歌曲标题" required>
+              <input name="artist" placeholder="艺术家" value="Qiaomu">
+              <input name="source" placeholder="来源" value="Suno">
+              <input name="album" placeholder="专辑/栏目" value="Qiaomu Radio">
+            </div>
+            <textarea name="lyrics" placeholder="歌词"></textarea>
+            <div class="form-row compact">
+              <label class="file-box">音频<input name="audio" type="file" accept="audio/*" required></label>
+              <label class="file-box">封面<input name="cover" type="file" accept="image/*"></label>
+              <label class="publish"><input name="published" type="checkbox" checked> 对外发布</label>
+              <button>上传歌曲</button>
+            </div>
+          </form>
+
+          <div class="admin-list" id="adminList"></div>
+        </div>
+
+        <p class="status" id="status"></p>
+      </section>
+
+      <audio id="audio" preload="auto" playsinline></audio>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

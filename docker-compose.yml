@@ -1,0 +1,15 @@
+services:
+  music-player:
+    build: .
+    container_name: qiaomu-music-player
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3068:3068"
+    environment:
+      PORT: "3068"
+      DATA_DIR: "/data"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before starting the admin server}"
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-52428800}"
+    volumes:
+      - ./data:/data
