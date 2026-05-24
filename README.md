@@ -51,7 +51,7 @@ ADMIN_PASSWORD="$(openssl rand -base64 24)" npm start
 
 ```bash
 npm install
-ADMIN_PASSWORD=local-dev-password npm run dev:server
+ADMIN_PASSWORD=replace-with-local-password npm run dev:server
 npm run dev
 ```
 
@@ -92,7 +92,7 @@ SCREENSHOT_URL=http://127.0.0.1:5173 npm run capture:screenshots
 
 ### 数据和隐私
 
-公开仓库不会包含上传的歌曲、封面、真实曲库、`.env` 或 `suno-jobs/` 生成任务目录。
+公开仓库不会包含上传的歌曲、封面、真实曲库、`.env`、`suno-jobs/` 或 `cover-redesigns/` 生成任务目录。
 
 默认 `.gitignore` 已排除：
 
@@ -101,6 +101,7 @@ SCREENSHOT_URL=http://127.0.0.1:5173 npm run capture:screenshots
 - `data/tracks.json`
 - `.env` 和 `.env.*`
 - `suno-jobs/`
+- `cover-redesigns/`
 
 ### Legacy Upload API
 
@@ -166,7 +167,7 @@ Development mode:
 
 ```bash
 npm install
-ADMIN_PASSWORD=local-dev-password npm run dev:server
+ADMIN_PASSWORD=replace-with-local-password npm run dev:server
 npm run dev
 ```
 

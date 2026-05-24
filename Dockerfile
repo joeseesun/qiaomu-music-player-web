@@ -3,7 +3,7 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY index.html vite.config.ts tsconfig.json postcss.config.cjs tailwind.config.cjs ./
 COPY server.js Dockerfile docker-compose.yml ./

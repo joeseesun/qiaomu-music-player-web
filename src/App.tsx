@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, TouchEvent } from "react";
+import Coverflow from "react-coverflow";
 import {
   Check,
+  ChevronLeft,
+  ChevronRight,
   Compass,
   Edit3,
   Eye,
@@ -29,7 +32,7 @@ import {
   VolumeX,
   X
 } from "lucide-react";
-import { Button, Card, Light, Slider, Waveform } from "@nafr/echo-ui";
+import { Button, Card, Light, Waveform } from "@nafr/echo-ui";
 
 type Track = {
   id: string;
@@ -78,6 +81,7 @@ type LyricLine = {
 };
 
 const SETTINGS_KEY = "qiaomu-music-player-settings";
+const PLAY_COUNTS_KEY = "qiaomu-music-player-play-counts";
 
 const DEFAULT_SETTINGS: PlayerSettings = {
   theme: "amber",
@@ -144,6 +148,19 @@ const readSettings = (): PlayerSettings => {
     };
   } catch {
     return DEFAULT_SETTINGS;
+  }
+};
+
+const readPlayCounts = (): Record<string, number> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PLAY_COUNTS_KEY) || "{}");
+    if (!parsed || typeof parsed !== "object") return {};
+    return Object.fromEntries(Object.entries(parsed)
+      .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+      .map(([key, value]) => [key, value as number]));
+  } catch {
+    return {};
   }
 };
 
@@ -244,6 +261,14 @@ const buildPlaylists = (tracks: Track[]): Playlist[] => {
 
 const cleanFacetName = (value: string, fallback: string) => value.trim().replace(/\s+/g, " ") || fallback;
 
+const isSourceMetadata = (value: string) => {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  return !normalized
+    || /^suno(?:\s+suno)?(?:\s+v?\d+(?:\.\d+)*)?$/.test(normalized)
+    || /^v?\d+(?:\.\d+)*$/.test(normalized)
+    || /^(original|test|draft|demo|cover|generated cover)$/.test(normalized);
+};
+
 const buildDiscoveryFacets = (tracks: Track[]) => {
   const labels = new Map<string, string>();
   const addToMap = (map: Map<string, Set<string>>, label: string, trackId: string) => {
@@ -258,10 +283,12 @@ const buildDiscoveryFacets = (tracks: Track[]) => {
   const styles = new Map<string, Set<string>>();
   tracks.forEach((track) => {
     addToMap(categories, track.album || "Qiaomu Radio", track.id);
-    track.source
+    [track.source, track.album]
+      .join(" · ")
       .split(/[\/,，|·;；]+/g)
       .map((item) => item.trim())
       .filter(Boolean)
+      .filter((style) => !isSourceMetadata(style))
       .forEach((style) => addToMap(styles, style, track.id));
   });
   const toFacet = (map: Map<string, Set<string>>, description: string): DiscoveryFacet[] => Array.from(map.entries())
@@ -305,6 +332,7 @@ export default function App() {
   const [level, setLevel] = useState<number[]>(Array.from({ length: 36 }, () => 0));
   const [activePlaylistId, setActivePlaylistId] = useState("all");
   const [settings, setSettings] = useState<PlayerSettings>(() => readSettings());
+  const [playCounts, setPlayCounts] = useState<Record<string, number>>(() => readPlayCounts());
 
   const activeTrack = tracks[activeIndex];
   const playlists = useMemo(() => buildPlaylists(tracks), [tracks]);
@@ -366,18 +394,18 @@ export default function App() {
             return clamp(Math.pow(raw * lowEndLift, 0.5), 0, 1);
           });
           const energy = next.reduce((sum, value, index) => sum + value * (index < 8 ? 1.35 : 1), 0) / bucketCount;
-          const transient = clamp((energy - energyRef.current) * 5.4 + rms * 1.3, 0, 1);
-          energyRef.current = energyRef.current * 0.68 + energy * 0.32;
+          const transient = clamp((energy - energyRef.current) * 6.8 + rms * 1.45, 0, 1);
+          energyRef.current = energyRef.current * 0.54 + energy * 0.46;
           setLevel((current) => next.map((value, index) => {
             const currentValue = current[index] ?? 0;
             const center = 1 - Math.abs(index - (bucketCount - 1) / 2) / ((bucketCount - 1) / 2);
-            const boosted = clamp(value * (1.06 + transient * 0.72 + center * 0.18), 0, 1);
+            const boosted = clamp(value * (1.08 + transient * 0.92 + center * 0.18), 0, 1);
             return boosted > currentValue
-              ? currentValue * 0.12 + boosted * 0.88
-              : currentValue * 0.64 + boosted * 0.36;
+              ? currentValue * 0.04 + boosted * 0.96
+              : currentValue * 0.42 + boosted * 0.58;
           }));
         } else {
-          setLevel((current) => current.map((value) => value * 0.76));
+          setLevel((current) => current.map((value) => value * 0.58));
         }
       }
       raf = requestAnimationFrame(tick);
@@ -395,6 +423,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    window.localStorage.setItem(PLAY_COUNTS_KEY, JSON.stringify(playCounts));
+  }, [playCounts]);
 
   async function loadTracks(autoplay = false) {
     const response = await fetch("/api/tracks", { cache: "no-store" });
@@ -427,6 +459,7 @@ export default function App() {
     const track = tracks[index];
     if (!audio || !track) return;
     setActiveIndex(index);
+    setPlayCounts((current) => ({ ...current, [track.id]: (current[track.id] || 0) + 1 }));
     if (audio.src !== new URL(track.url, window.location.origin).href) {
       audio.src = track.url;
       audio.load();
@@ -446,7 +479,7 @@ export default function App() {
       audioContextRef.current = new AudioContextCtor();
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 2048;
-      analyserRef.current.smoothingTimeConstant = 0.36;
+      analyserRef.current.smoothingTimeConstant = 0.18;
       frequencyDataRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
       timeDataRef.current = new Uint8Array(analyserRef.current.fftSize);
     }
@@ -630,20 +663,17 @@ export default function App() {
       <div className="app-shell grid h-screen grid-cols-[76px_minmax(0,1fr)] gap-3 p-3 max-lg:grid-cols-1">
         <SideRail
           view={view}
-          playlists={playlists}
-          activePlaylistId={activePlaylist?.id || activePlaylistId}
           onHomeClick={() => {
             setView("home");
             setActivePlaylistId("all");
           }}
           onDiscoverClick={() => setView("discover")}
           onSettingsClick={() => setView("settings")}
-          onPlaylistPick={pickPlaylist}
         />
 
         {view === "home" ? (
           <main className="radio-layout grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(360px,42vw)] gap-3 max-xl:grid-cols-1">
-            <section className="radio-primary grid min-h-0 grid-rows-[minmax(360px,auto)_minmax(0,1fr)] gap-3">
+            <section className="radio-primary grid min-h-0 grid-rows-[minmax(340px,auto)_auto] gap-3">
               <div
                 className="player-stage grid min-h-0 grid-cols-[minmax(260px,390px)_minmax(0,1fr)] gap-3 max-lg:grid-cols-1"
                 onTouchStart={handlePlayerSwipeStart}
@@ -689,7 +719,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4">
+                  <div className="player-waveform-block grid gap-4">
                     <Waveform
                       data={waveform}
                       audioDuration={duration || 180}
@@ -706,9 +736,21 @@ export default function App() {
                     />
                     <div className="grid grid-cols-[52px_minmax(0,1fr)_52px] items-center gap-3 text-xs text-muted-foreground">
                       <span>{formatTime(time)}</span>
-                      <Slider value={progress} min={0} max={100} hideThumbLabel onChange={(value) => {
-                        if (audioRef.current && duration) audioRef.current.currentTime = (value / 100) * duration;
-                      }} />
+                      <input
+                        className="progress-slider"
+                        aria-label="播放进度"
+                        type="range"
+                        min="0"
+                        max="1000"
+                        value={duration ? Math.round(progress * 10) : 0}
+                        disabled={!duration}
+                        onChange={(event) => {
+                          if (audioRef.current && duration) audioRef.current.currentTime = (Number(event.target.value) / 1000) * duration;
+                        }}
+                        onInput={(event) => {
+                          if (audioRef.current && duration) audioRef.current.currentTime = (Number(event.currentTarget.value) / 1000) * duration;
+                        }}
+                      />
                       <span className="text-right">{formatTime(duration)}</span>
                     </div>
                   </div>
@@ -756,14 +798,21 @@ export default function App() {
         ) : view === "discover" ? (
           <DiscoverPanel
             tracks={tracks}
-            playlists={playlists}
             categories={discovery.categories}
             styles={discovery.styles}
+            playCounts={playCounts}
+            activeTrackId={activeTrack?.id}
+            isPlaying={isPlaying}
+            time={time}
+            duration={duration}
+            onToggleTrack={(track) => {
+              if (activeTrack?.id === track.id && isPlaying) pause();
+              else void playTrack(tracks.findIndex((item) => item.id === track.id));
+            }}
             onPickTrack={(track) => {
               setView("home");
               void playTrack(tracks.findIndex((item) => item.id === track.id));
             }}
-            onPickPlaylist={pickPlaylist}
             onPickFacet={pickFacet}
           />
         ) : view === "settings" ? (
@@ -790,28 +839,126 @@ export default function App() {
           />
         )}
       </div>
+      <GlobalPlayerBar
+        track={activeTrack}
+        isPlaying={isPlaying}
+        time={time}
+        duration={duration}
+        progress={progress}
+        shuffle={shuffle}
+        repeat={repeat}
+        volume={volume}
+        onOpen={() => setView("home")}
+        onToggle={() => isPlaying ? pause() : void playTrack()}
+        onPrev={prevTrack}
+        onNext={nextTrack}
+        onToggleShuffle={() => setShuffle(!shuffle)}
+        onToggleRepeat={() => setRepeat(!repeat)}
+        onSeek={(nextTime) => {
+          if (audioRef.current && duration) audioRef.current.currentTime = nextTime;
+        }}
+        onToggleMute={toggleMute}
+        onVolumeChange={setVolume}
+      />
     </div>
+  );
+}
+
+function GlobalPlayerBar({
+  track,
+  isPlaying,
+  time,
+  duration,
+  progress,
+  shuffle,
+  repeat,
+  volume,
+  onOpen,
+  onToggle,
+  onPrev,
+  onNext,
+  onToggleShuffle,
+  onToggleRepeat,
+  onSeek,
+  onToggleMute,
+  onVolumeChange
+}: {
+  track?: Track;
+  isPlaying: boolean;
+  time: number;
+  duration: number;
+  progress: number;
+  shuffle: boolean;
+  repeat: boolean;
+  volume: number;
+  onOpen: () => void;
+  onToggle: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onToggleShuffle: () => void;
+  onToggleRepeat: () => void;
+  onSeek: (time: number) => void;
+  onToggleMute: () => void;
+  onVolumeChange: (volume: number) => void;
+}) {
+  return (
+    <footer className="global-player-bar" aria-label="全局播放控制">
+      <button type="button" className="global-player-track" onClick={onOpen} title="打开当前播放">
+        <span className="global-player-cover">{track?.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={22} />}</span>
+        <span className="global-player-meta">
+          <strong>{track?.title || "Qiaomu Music"}</strong>
+          <small>{track ? track.artist : "选择一首歌开始播放"}</small>
+        </span>
+      </button>
+
+      <div className="global-player-center">
+        <div className="global-player-controls">
+          <button type="button" className={`global-player-icon global-player-mode ${shuffle ? "is-active" : ""}`} onClick={onToggleShuffle} title={shuffle ? "随机播放" : "顺序播放"}><Shuffle size={16} /></button>
+          <button type="button" className="global-player-icon" onClick={onPrev} title="上一首"><SkipBack size={18} /></button>
+          <button type="button" className="global-player-main" onClick={onToggle} title={isPlaying ? "暂停" : "播放"}>
+            {isPlaying ? <Pause size={24} /> : <Play size={24} />}
+          </button>
+          <button type="button" className="global-player-icon" onClick={onNext} title="下一首"><SkipForward size={18} /></button>
+          <button type="button" className={`global-player-icon global-player-mode ${repeat ? "is-active" : ""}`} onClick={onToggleRepeat} title="单曲循环"><Repeat2 size={16} /></button>
+        </div>
+        <div className="global-player-progress-row">
+          <span>{formatTime(time)}</span>
+          <input
+            className="global-player-progress"
+            aria-label="全局播放进度"
+            type="range"
+            min="0"
+            max="1000"
+            value={duration ? Math.round(progress * 10) : 0}
+            disabled={!duration}
+            onChange={(event) => onSeek((Number(event.target.value) / 1000) * duration)}
+            onInput={(event) => onSeek((Number(event.currentTarget.value) / 1000) * duration)}
+          />
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+
+      <div className="global-player-volume">
+        <button type="button" className="global-player-icon" onClick={onToggleMute} title={volume > 0 ? "静音" : "恢复音量"}>
+          {volume > 0 ? <Volume2 size={16} /> : <VolumeX size={16} />}
+        </button>
+        <input aria-label="全局音量" type="range" min="0" max="100" value={volume} onChange={(event) => onVolumeChange(Number(event.target.value))} />
+      </div>
+    </footer>
   );
 }
 
 function SideRail({
   view,
-  playlists,
-  activePlaylistId,
   onHomeClick,
   onDiscoverClick,
-  onSettingsClick,
-  onPlaylistPick
+  onSettingsClick
 }: {
   view: View;
-  playlists: Playlist[];
-  activePlaylistId: string;
   onHomeClick: () => void;
   onDiscoverClick: () => void;
   onSettingsClick: () => void;
-  onPlaylistPick: (playlist: Playlist) => void;
 }) {
-  const [playlistsOpen, setPlaylistsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
@@ -831,7 +978,8 @@ function SideRail({
         </button>
         <span className="text-[11px] font-bold text-muted-foreground max-lg:hidden">MUSIC</span>
       </div>
-      <div className={`side-actions flex flex-1 flex-col justify-center gap-3 max-lg:flex-row ${mobileMenuOpen ? "is-open" : ""}`}>
+      <div className="mobile-brand-title" aria-label="乔木音乐">乔木音乐</div>
+      <div className={`side-actions flex flex-1 flex-col gap-3 max-lg:flex-row ${mobileMenuOpen ? "is-open" : ""}`}>
         <button
           type="button"
           className={`settings-trigger ${view === "home" ? "is-active" : ""}`}
@@ -856,65 +1004,9 @@ function SideRail({
           <Compass size={19} />
           <span className="mobile-menu-text">发现</span>
         </button>
-        <div className="relative">
-          <button
-            type="button"
-            className="settings-trigger"
-            onClick={() => setPlaylistsOpen(!playlistsOpen)}
-            title="播放清单"
-          >
-            <Music2 size={18} />
-            <span className="mobile-menu-text">播放清单</span>
-          </button>
-          {playlistsOpen ? (
-            <div className="playlist-popover">
-              <div className="playlist-popover-title">播放清单</div>
-              {playlists.map((playlist) => (
-                <button
-                  key={playlist.id}
-                  type="button"
-                  className={playlist.id === activePlaylistId ? "is-active" : ""}
-                  onClick={() => {
-                    onPlaylistPick(playlist);
-                    setPlaylistsOpen(false);
-                    closeMobileMenu();
-                  }}
-                >
-                  <span>
-                    <strong>{playlist.name}</strong>
-                    <small>{playlist.description}</small>
-                  </span>
-                  <em>{playlist.trackIds.length}</em>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        <div className="mobile-menu-section">
-          <div className="mobile-menu-title"><Music2 size={16} /> 播放清单</div>
-          <div className="mobile-menu-playlists">
-            {playlists.map((playlist) => (
-              <button
-                key={playlist.id}
-                type="button"
-                className={playlist.id === activePlaylistId ? "is-active" : ""}
-                onClick={() => {
-                  onPlaylistPick(playlist);
-                  closeMobileMenu();
-                }}
-              >
-                <span>
-                  <strong>{playlist.name}</strong>
-                  <small>{playlist.description}</small>
-                </span>
-                <em>{playlist.trackIds.length}</em>
-              </button>
-            ))}
-          </div>
-        </div>
         <button
           type="button"
-          className={`settings-trigger ${view === "settings" ? "is-active" : ""}`}
+          className={`settings-trigger side-settings ${view === "settings" ? "is-active" : ""}`}
           title="设置"
           onClick={() => {
             onSettingsClick();
@@ -1108,7 +1200,7 @@ function QueuePanel({ tracks, activeId, query, setQuery, onPick }: {
           <input className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索歌曲/风格" />
         </label>
       </Card.Header>
-      <Card.Body className="grid min-h-0 gap-2 overflow-auto px-4 pb-5">
+      <Card.Body className="queue-list grid min-h-0 gap-2 px-4 pb-5">
         {tracks.map((track) => (
           <button key={track.id} onClick={() => onPick(track)} className={`grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-md p-2 text-left transition hover:bg-white/10 ${track.id === activeId ? "bg-primary/15" : ""}`}>
             <span className="h-[52px] w-[52px] overflow-hidden rounded bg-muted">
@@ -1126,101 +1218,233 @@ function QueuePanel({ tracks, activeId, query, setQuery, onPick }: {
   );
 }
 
-function DiscoverPanel({ tracks, playlists, categories, styles, onPickTrack, onPickPlaylist, onPickFacet }: {
+function DiscoverPanel({ tracks, categories, styles, playCounts, activeTrackId, isPlaying, time, duration, onToggleTrack, onPickTrack, onPickFacet }: {
   tracks: Track[];
-  playlists: Playlist[];
   categories: DiscoveryFacet[];
   styles: DiscoveryFacet[];
+  playCounts: Record<string, number>;
+  activeTrackId?: string;
+  isPlaying: boolean;
+  time: number;
+  duration: number;
+  onToggleTrack: (track: Track) => void;
   onPickTrack: (track: Track) => void;
-  onPickPlaylist: (playlist: Playlist) => void;
   onPickFacet: (facet: DiscoveryFacet) => void;
 }) {
   const [discoverQuery, setDiscoverQuery] = useState("");
-  const [activeStyleId, setActiveStyleId] = useState(styles[0]?.id || "");
+  const [activeStyleId, setActiveStyleId] = useState("all");
+  const [recentStyleId, setRecentStyleId] = useState("all");
   const q = discoverQuery.trim().toLowerCase();
   const searchResults = useMemo(() => {
-    if (!q) return tracks.slice(0, 8);
+    if (!q) return [];
     return tracks
       .filter((track) => [track.title, track.artist, track.source, track.album, track.lyrics].join(" ").toLowerCase().includes(q))
-      .slice(0, 18);
+      .slice(0, 10);
   }, [q, tracks]);
-  const selectedStyle = styles.find((style) => style.id === activeStyleId) || styles[0];
+  const selectedStyle = activeStyleId === "all" ? null : styles.find((style) => style.id === activeStyleId) || null;
   const styleTracks = selectedStyle
-    ? tracks.filter((track) => selectedStyle.trackIds.includes(track.id)).slice(0, 8)
-    : [];
-  const featuredPlaylists = playlists.filter((playlist) => playlist.trackIds.length > 0);
+    ? tracks.filter((track) => selectedStyle.trackIds.includes(track.id)).slice(0, 10)
+    : tracks.slice(0, 10);
+  const recentTracks = useMemo(() => tracks
+    .map((track) => ({ track, count: playCounts[track.id] || 0 }))
+    .filter(({ count }) => count > 0)
+    .sort((a, b) => b.count - a.count || new Date(b.track.createdAt).getTime() - new Date(a.track.createdAt).getTime())
+    .slice(0, 8), [playCounts, tracks]);
+  const recentStyle = recentStyleId === "all" ? null : styles.find((style) => style.id === recentStyleId) || null;
+  const filteredRecentTracks = useMemo(() => {
+    if (!recentStyle) return recentTracks;
+    const ids = new Set(recentStyle.trackIds);
+    return recentTracks.filter(({ track }) => ids.has(track.id));
+  }, [recentStyle, recentTracks]);
+  const coverFlowTracks = useMemo(() => tracks.filter((track) => track.coverUrl), [tracks]);
+  const [coverFlowIndex, setCoverFlowIndex] = useState(0);
+  const [compactCoverFlow, setCompactCoverFlow] = useState(false);
+  const coverFlowLengthRef = useRef(0);
+  const coverFlowRef = useRef<any>(null);
+  const heroTrack = coverFlowTracks[coverFlowIndex] || coverFlowTracks[0] || tracks[0];
+  const coverFlowSideCount = compactCoverFlow ? 1 : 2;
+  const coverFlowHitTargets = useMemo(() => {
+    const targets: Array<{ track: Track; index: number; offset: number }> = [];
+    for (let offset = -coverFlowSideCount; offset <= coverFlowSideCount; offset += 1) {
+      const index = coverFlowIndex + offset;
+      const track = coverFlowTracks[index];
+      if (!track) continue;
+      targets.push({ track, index, offset });
+    }
+    return targets;
+  }, [coverFlowIndex, coverFlowSideCount, coverFlowTracks]);
 
   useEffect(() => {
-    if (!activeStyleId && styles[0]) setActiveStyleId(styles[0].id);
-  }, [activeStyleId, styles]);
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 700px)");
+    const syncCompact = () => setCompactCoverFlow(media.matches);
+    syncCompact();
+    media.addEventListener("change", syncCompact);
+    return () => media.removeEventListener("change", syncCompact);
+  }, []);
+
+  useEffect(() => {
+    if (coverFlowLengthRef.current === coverFlowTracks.length) return;
+    coverFlowLengthRef.current = coverFlowTracks.length;
+    setCoverFlowIndex(coverFlowTracks.length ? Math.floor(coverFlowTracks.length / 2) : 0);
+  }, [coverFlowTracks.length]);
+
+  useEffect(() => {
+    if (coverFlowIndex >= coverFlowTracks.length) setCoverFlowIndex(0);
+  }, [coverFlowIndex, coverFlowTracks.length]);
+
+  const syncCoverFlowVisual = (index: number) => {
+    coverFlowRef.current?._handleFigureClick?.(index, undefined, { preventDefault: () => undefined });
+  };
+  const playCoverFlowIndex = (index: number) => {
+    const nextTrack = coverFlowTracks[index];
+    if (!nextTrack) return;
+    syncCoverFlowVisual(index);
+    setCoverFlowIndex(index);
+    onToggleTrack(nextTrack);
+  };
+  const shiftCoverFlow = (direction: -1 | 1) => {
+    if (!coverFlowTracks.length) return;
+    const nextIndex = (coverFlowIndex + direction + coverFlowTracks.length) % coverFlowTracks.length;
+    playCoverFlowIndex(nextIndex);
+  };
+  const selectCoverFlowTrack = (track: Track, index: number) => {
+    syncCoverFlowVisual(index);
+    setCoverFlowIndex(index);
+    onToggleTrack(track);
+  };
+  const heroIsActive = heroTrack?.id === activeTrackId;
+  const heroIsPlaying = Boolean(heroTrack && heroIsActive && isPlaying);
+  const heroTime = heroIsActive ? time : 0;
+  const heroDuration = heroIsActive ? duration : 0;
 
   return (
-    <main className="discover-page grid min-h-0 gap-3 overflow-auto pr-1">
-      <Card className="discover-hero border border-white/10 bg-card/90">
-        <Card.Body className="grid gap-5 p-6">
-          <div className="flex flex-wrap items-end justify-between gap-4">
+    <main className="discover-page discover-two-column min-h-0 overflow-auto pr-1">
+      <section className="discover-left-column">
+        <Card className="discover-cover-card border border-white/10 bg-card/90">
+          <Card.Header className="discover-cover-header p-5">
             <div>
               <p className="flex items-center gap-2 text-sm text-muted-foreground"><Compass size={16} /> Discover</p>
               <h1 className="text-4xl font-black tracking-normal max-sm:text-3xl">发现音乐</h1>
             </div>
-            <div className="discover-stats">
-              <span><strong>{tracks.length}</strong><small>已发布歌曲</small></span>
-              <span><strong>{featuredPlaylists.length}</strong><small>播放列表</small></span>
-              <span><strong>{styles.length}</strong><small>风格</small></span>
+          </Card.Header>
+          <Card.Body className="px-5 pb-5">
+            <div className="discover-cover-flow">
+              {coverFlowTracks.length ? (
+                <div
+                  className="cover-flow-library"
+                  aria-label="专辑封面展示"
+                >
+                  <Coverflow
+                    ref={coverFlowRef}
+                    width="100%"
+                    height="220"
+                    displayQuantityOfSide={coverFlowSideCount}
+                    navigation={false}
+                    enableHeading={false}
+                    enableScroll
+                    clickable
+                    active={coverFlowIndex}
+                    currentFigureScale={compactCoverFlow ? 2.05 : 1.34}
+                    otherFigureScale={compactCoverFlow ? 0.88 : 0.7}
+                  >
+                    {coverFlowTracks.map((track, index) => (
+                      <div
+                        key={track.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => selectCoverFlowTrack(track, index)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          selectCoverFlowTrack(track, index);
+                        }}
+                        title={index === coverFlowIndex ? `${heroIsPlaying ? "暂停" : "播放"} ${track.title}` : `播放 ${track.title}`}
+                      >
+                        <img src={track.coverUrl} alt={track.title} />
+                      </div>
+                    ))}
+                  </Coverflow>
+                </div>
+              ) : (
+                <span className="cover-flow-empty"><Music2 size={40} /></span>
+              )}
+              {coverFlowHitTargets.length ? (
+                <div className="cover-flow-hit-targets" aria-hidden="true">
+                  {coverFlowHitTargets.map(({ track, index, offset }) => {
+                    const positionClass = offset === 0 ? "is-center" : offset < 0 ? `is-left-${Math.abs(offset)}` : `is-right-${offset}`;
+                    return (
+                      <button
+                        key={track.id}
+                        type="button"
+                        tabIndex={-1}
+                        className={`cover-flow-hit-target ${positionClass}`}
+                        onClick={() => selectCoverFlowTrack(track, index)}
+                        title={index === coverFlowIndex ? `${heroIsPlaying ? "暂停" : "播放"} ${track.title}` : `播放 ${track.title}`}
+                      />
+                    );
+                  })}
+                </div>
+              ) : null}
+              {coverFlowTracks.length > 1 ? (
+                <div className="cover-flow-switcher" aria-label="切换封面">
+                  <button type="button" onClick={() => shiftCoverFlow(-1)} title="上一张封面"><ChevronLeft size={20} /></button>
+                  <button type="button" onClick={() => shiftCoverFlow(1)} title="下一张封面"><ChevronRight size={20} /></button>
+                </div>
+              ) : null}
+              {heroTrack ? (
+                <>
+                  <button type="button" className="cover-flow-center-toggle" onClick={() => onToggleTrack(heroTrack)} title={heroIsPlaying ? `暂停 ${heroTrack.title}` : `播放 ${heroTrack.title}`}>
+                    <span>{heroIsPlaying ? <Pause size={34} /> : <Play size={34} />}</span>
+                  </button>
+                  <button type="button" className="cover-flow-current" onClick={() => onPickTrack(heroTrack)} title={`打开 ${heroTrack.title} 详情`}>
+                    <strong>{heroTrack.title}</strong>
+                    <small>{formatTime(heroTime)} / {formatTime(heroDuration)} · {heroTrack.album}</small>
+                  </button>
+                </>
+              ) : null}
             </div>
-          </div>
-          <label className="discover-search">
-            <Search size={18} />
-            <input value={discoverQuery} onChange={(event) => setDiscoverQuery(event.target.value)} placeholder="搜索歌曲、风格、歌词或专辑" />
-          </label>
-        </Card.Body>
-      </Card>
-
-      <section className="discover-grid">
-        <Card className="border border-white/10 bg-card/90">
-          <Card.Header className="flex items-center justify-between p-5">
-            <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Sparkles size={19} /> 推荐播放列表</h2>
-          </Card.Header>
-          <Card.Body className="playlist-shelf px-5 pb-5">
-            {featuredPlaylists.map((playlist) => (
-              <button key={playlist.id} type="button" onClick={() => onPickPlaylist(playlist)} className="discover-playlist">
-                <span>
-                  <strong>{playlist.name}</strong>
-                  <small>{playlist.description}</small>
-                </span>
-                <em>{playlist.trackIds.length} 首</em>
-              </button>
-            ))}
-            {!featuredPlaylists.length ? <EmptyState text="发布歌曲后会自动生成播放列表。" /> : null}
           </Card.Body>
         </Card>
 
         <Card className="border border-white/10 bg-card/90">
-          <Card.Header className="p-5">
-            <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Tags size={19} /> 分类</h2>
+          <Card.Header className="grid gap-3 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Search size={19} /> 搜索</h2>
+              <span className="text-sm text-primary">{searchResults.length}</span>
+            </div>
+            <label className="discover-search">
+              <Search size={18} />
+              <input value={discoverQuery} onChange={(event) => setDiscoverQuery(event.target.value)} placeholder="搜索歌曲、风格、歌词或专辑" />
+            </label>
           </Card.Header>
-          <Card.Body className="facet-grid px-5 pb-5">
-            {categories.map((category) => (
-              <button key={category.id} type="button" onClick={() => onPickFacet(category)} className="facet-card">
-                <strong>{category.name}</strong>
-                <small>{category.trackIds.length} 首 · {category.description}</small>
-              </button>
-            ))}
-            {!categories.length ? <EmptyState text="暂无可浏览分类。" /> : null}
-          </Card.Body>
+          {q ? (
+            <Card.Body className="search-result-list px-4 pb-5">
+              {searchResults.map((track) => (
+                <button key={track.id} type="button" className="search-result" onClick={() => onPickTrack(track)}>
+                  <span className="discover-cover">{track.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={18} />}</span>
+                  <span className="min-w-0">
+                    <strong>{track.title}</strong>
+                    <small>{track.album} · {track.source}</small>
+                  </span>
+                  <Play size={16} />
+                </button>
+              ))}
+              {!searchResults.length ? <EmptyState text="没有找到匹配歌曲。" /> : null}
+            </Card.Body>
+          ) : null}
         </Card>
-      </section>
 
-      <section className="discover-grid is-wide">
         <Card className="border border-white/10 bg-card/90">
           <Card.Header className="grid gap-3 p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-black tracking-normal">按风格浏览</h2>
-              <span className="text-sm text-primary">{selectedStyle?.trackIds.length || 0} 首</span>
+              <span className="text-sm text-primary">{selectedStyle?.trackIds.length || tracks.length} 首</span>
             </div>
             <div className="style-chip-row">
+              <button type="button" className={activeStyleId === "all" ? "is-active" : ""} onClick={() => setActiveStyleId("all")}>所有</button>
               {styles.map((style) => (
-                <button key={style.id} type="button" className={style.id === selectedStyle?.id ? "is-active" : ""} onClick={() => setActiveStyleId(style.id)}>
+                <button key={style.id} type="button" className={style.id === activeStyleId ? "is-active" : ""} onClick={() => setActiveStyleId(style.id)}>
                   {style.name}
                 </button>
               ))}
@@ -1239,26 +1463,51 @@ function DiscoverPanel({ tracks, playlists, categories, styles, onPickTrack, onP
             {!styleTracks.length ? <EmptyState text="暂无可浏览风格。" /> : null}
           </Card.Body>
         </Card>
+      </section>
 
+      <section className="discover-right-column">
         <Card className="border border-white/10 bg-card/90">
-          <Card.Header className="flex items-center justify-between p-5">
-            <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Search size={19} /> 搜索结果</h2>
-            <span className="text-sm text-primary">{searchResults.length}</span>
+          <Card.Header className="grid gap-3 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Sparkles size={19} /> 最近播放</h2>
+              <span className="text-sm text-muted-foreground">按播放次数</span>
+            </div>
+            <div className="style-chip-row">
+              <button type="button" className={recentStyleId === "all" ? "is-active" : ""} onClick={() => setRecentStyleId("all")}>所有</button>
+              {styles.map((style) => (
+                <button key={style.id} type="button" className={recentStyleId === style.id ? "is-active" : ""} onClick={() => setRecentStyleId(style.id)}>
+                  {style.name}
+                </button>
+              ))}
+            </div>
           </Card.Header>
-          <Card.Body className="search-result-list px-4 pb-5">
-            {searchResults.map((track) => (
-              <button key={track.id} type="button" className="search-result" onClick={() => onPickTrack(track)}>
+          <Card.Body className="recent-play-list px-4 pb-5">
+            {filteredRecentTracks.map(({ track, count }) => (
+              <button key={track.id} type="button" className="search-result recent-play-item" onClick={() => onPickTrack(track)}>
                 <span className="discover-cover">{track.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={18} />}</span>
                 <span className="min-w-0">
                   <strong>{track.title}</strong>
                   <small>{track.album} · {track.source}</small>
                 </span>
-                <Play size={16} />
+                <em>{count}</em>
               </button>
             ))}
-            {!searchResults.length ? (
-              <div className="rounded-md border border-white/10 bg-black/20 p-8 text-center text-sm text-muted-foreground">没有找到匹配歌曲。</div>
-            ) : null}
+            {!filteredRecentTracks.length ? <EmptyState text="开始播放后，这里会按次数排列常听歌曲。" /> : null}
+          </Card.Body>
+        </Card>
+
+        <Card className="border border-white/10 bg-card/90">
+          <Card.Header className="p-5">
+            <h2 className="flex items-center gap-2 text-xl font-black tracking-normal"><Tags size={19} /> 分类</h2>
+          </Card.Header>
+          <Card.Body className="facet-grid px-5 pb-5">
+            {categories.map((category) => (
+              <button key={category.id} type="button" onClick={() => onPickFacet(category)} className="facet-card">
+                <strong>{category.name}</strong>
+                <small>{category.trackIds.length} 首 · {category.description}</small>
+              </button>
+            ))}
+            {!categories.length ? <EmptyState text="暂无可浏览分类。" /> : null}
           </Card.Body>
         </Card>
       </section>
@@ -1344,9 +1593,9 @@ function SettingsPanel({ settings, updateSettings, onOpenAdmin, onBack }: {
               </div>
               <div className="segmented-control">
                 {([
-                  ["ring", "声幕"],
-                  ["halo", "光晕"],
-                  ["bars", "底部"]
+                  ["ring", "横向波纹"],
+                  ["halo", "封面光圈"],
+                  ["bars", "底部频谱"]
                 ] as const).map(([value, label]) => (
                   <button
                     key={value}
@@ -1397,8 +1646,9 @@ function SettingsPanel({ settings, updateSettings, onOpenAdmin, onBack }: {
                   <span
                     key={index}
                     style={{
-                      "--angle": `${(index / 28) * 360}deg`,
-                      "--index": index,
+                     "--angle": `${(index / 28) * 360}deg`,
+                     "--index": index,
+                      "--delay": `${index * -72}ms`,
                       "--x": `${7 + index * 3.2}%`,
                       "--value": 0.18 + (Math.sin(index * 1.7) + 1) * 0.34
                     } as CSSProperties}
