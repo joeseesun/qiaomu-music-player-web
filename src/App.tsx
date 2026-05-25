@@ -98,12 +98,19 @@ const slugifyTrackTitle = (value: string) => value
   .replace(/^-+|-+$/g, "")
   .slice(0, 80) || "track";
 
-const trackPath = (track: Track) => `/track/${encodeURIComponent(track.id)}/${encodeURIComponent(slugifyTrackTitle(track.title))}`;
+const trackPath = (track: Track) => `/track/${encodeURIComponent(`${slugifyTrackTitle(track.title)}-${track.id.slice(0, 4).toLowerCase()}`)}`;
 
-const getInitialTrackId = () => {
+const getInitialTrackKey = () => {
   if (typeof window === "undefined") return "";
   const match = /^\/track\/([^/]+)/.exec(window.location.pathname);
   return match ? decodeURIComponent(match[1]) : "";
+};
+
+const matchesTrackKey = (track: Track, key: string) => {
+  const normalizedKey = slugifyTrackTitle(key);
+  return normalizedKey === `${slugifyTrackTitle(track.title)}-${track.id.slice(0, 4).toLowerCase()}`
+    || normalizedKey === slugifyTrackTitle(track.title)
+    || key === track.id;
 };
 
 const THEMES: Record<ThemeId, {
@@ -372,9 +379,9 @@ export default function App() {
 
   useEffect(() => {
     const handlePopState = () => {
-      const trackId = getInitialTrackId();
-      if (!trackId) return;
-      const nextIndex = tracks.findIndex((track) => track.id === trackId);
+      const trackKey = getInitialTrackKey();
+      if (!trackKey) return;
+      const nextIndex = tracks.findIndex((track) => matchesTrackKey(track, trackKey));
       if (nextIndex >= 0) {
         setActiveIndex(nextIndex);
         setView("home");
@@ -472,8 +479,8 @@ export default function App() {
     const next = data.tracks || [];
     setTracks(next);
     if (next.length) {
-      const routeTrackId = getInitialTrackId();
-      const routeIndex = routeTrackId ? next.findIndex((track: Track) => track.id === routeTrackId) : -1;
+      const routeTrackKey = getInitialTrackKey();
+      const routeIndex = routeTrackKey ? next.findIndex((track: Track) => matchesTrackKey(track, routeTrackKey)) : -1;
       const preservedIndex = activeTrack ? next.findIndex((track: Track) => track.id === activeTrack.id) : -1;
       const nextIndex = routeIndex >= 0 ? routeIndex : preservedIndex >= 0 ? preservedIndex : 0;
       setActiveIndex(nextIndex);
@@ -673,15 +680,22 @@ export default function App() {
     const url = new URL(trackPath(track), window.location.origin).href;
     const title = `${track.title} - Qiaomu Music`;
     const text = [track.artist, track.album].filter(Boolean).join(" · ");
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      copied = true;
+      setStatus("分享链接已复制。");
+    } catch {
+      copied = false;
+    }
     try {
       if (navigator.share) {
         await navigator.share({ title, text, url });
         return;
       }
-      await navigator.clipboard.writeText(url);
-      setStatus("分享链接已复制。");
+      if (!copied) setStatus(url);
     } catch (error) {
-      if ((error as Error).name !== "AbortError") setStatus("分享失败，可以稍后再试。");
+      if ((error as Error).name !== "AbortError" && !copied) setStatus("分享失败，可以稍后再试。");
     }
   }
 

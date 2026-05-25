@@ -95,7 +95,8 @@ function absoluteUrl(req, pathname) {
 }
 
 function trackPath(track) {
-  return `/track/${encodeURIComponent(track.id)}/${encodeURIComponent(slugify(track.title))}`;
+  const shortCode = String(track.id || "").slice(0, 4).toLowerCase();
+  return `/track/${encodeURIComponent(`${slugify(track.title)}-${shortCode}`)}`;
 }
 
 async function ensureStorage() {
@@ -153,9 +154,12 @@ async function listTracks({ admin = false } = {}) {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
-async function findPublishedTrack(id) {
+async function findPublishedTrackByKey(key) {
   const tracks = await listTracks({ admin: false });
-  return tracks.find((track) => track.id === id);
+  const normalizedKey = slugify(key);
+  return tracks.find((track) => normalizedKey === `${slugify(track.title)}-${String(track.id || "").slice(0, 4).toLowerCase()}`)
+    || tracks.find((track) => slugify(track.title) === normalizedKey)
+    || tracks.find((track) => track.id === key);
 }
 
 async function serveAppHtml(res, extraHead = "") {
@@ -488,7 +492,7 @@ async function route(req, res) {
 
   const publicTrackApiMatch = /^\/api\/tracks\/([^/]+)$/.exec(url.pathname);
   if (publicTrackApiMatch) {
-    const track = await findPublishedTrack(decodeURIComponent(publicTrackApiMatch[1]));
+    const track = await findPublishedTrackByKey(decodeURIComponent(publicTrackApiMatch[1]));
     if (!track) {
       send(res, 404, { error: "track_not_found" });
       return;
@@ -549,7 +553,7 @@ async function route(req, res) {
 
   const trackPageMatch = /^\/track\/([^/]+)(?:\/.*)?$/.exec(url.pathname);
   if (trackPageMatch) {
-    const track = await findPublishedTrack(decodeURIComponent(trackPageMatch[1]));
+    const track = await findPublishedTrackByKey(decodeURIComponent(trackPageMatch[1]));
     if (track) {
       await serveTrackPage(req, res, track);
       return;
