@@ -7,6 +7,7 @@ RUN npm ci --legacy-peer-deps
 
 COPY index.html vite.config.ts tsconfig.json postcss.config.cjs tailwind.config.cjs ./
 COPY server.js Dockerfile docker-compose.yml ./
+COPY public public
 COPY src src
 COPY scripts scripts
 RUN npm run build

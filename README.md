@@ -10,7 +10,11 @@
 [![License](https://img.shields.io/github/license/joeseesun/qiaomu-music-player-web?style=flat-square)](LICENSE)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/joeseesun/qiaomu-music-player-web)
 
+[Live Demo](https://music.qiaomu.ai) · [iOS App](ios/QiaomuMusic) · [Public API](#公开播放-api) · [License](LICENSE)
+
 ![Qiaomu Music Player Web radio interface with playlist and synced lyrics](docs/assets/product-screenshot.png)
+
+![Qiaomu Music iOS app library screen](docs/assets/ios-library.png)
 
 **[中文](#中文) | [English](#english)**
 
@@ -23,10 +27,14 @@
 
 Qiaomu Music Player Web 把它们放进一个可以自托管的网页电台：前台负责播放、队列、歌词和视觉动效，后台负责上传、编辑、试听、发布和下架。
 
+如果你只想听歌，也可以用仓库里的 SwiftUI iPhone 客户端读取公开播放 API，像 Apple Music 一样浏览、搜索和播放自己的 AI 歌曲库。
+
 ### 核心功能
 
 - 电台前台：播放队列、封面、歌词滚动、主题配色和声纹动效。
 - 后台曲库：上传音频、封面、歌词和元数据。
+- iOS 客户端：SwiftUI、AVPlayer、锁屏控制、后台播放、歌词点按跳转。
+- 公开播放 API：已发布歌曲可被其他网站、移动客户端和嵌入组件读取。
 - 草稿试听：后台未发布歌曲也可以试听，不影响前台电台。
 - 发布控制：一键发布或取消发布，并给出明确反馈。
 - 本地存储：音频在 `data/music`，封面在 `data/covers`，元数据在 `data/tracks.json`。
@@ -117,6 +125,54 @@ curl -X PUT \
 
 新项目建议优先用后台页面上传。
 
+### 公开播放 API
+
+已发布歌曲可以被其他网站读取和播放。公开接口默认返回绝对 URL，并带有 CORS 响应头。
+
+```bash
+curl http://127.0.0.1:3068/api/public
+curl http://127.0.0.1:3068/api/public/tracks
+curl http://127.0.0.1:3068/api/public/tracks/TRACK_ID
+curl http://127.0.0.1:3068/api/public/tracks/TRACK_ID/lyrics
+```
+
+嵌入播放器：
+
+```html
+<script defer src="https://music.example.com/embed/player.js"></script>
+<qiaomu-music-player track="TRACK_ID"></qiaomu-music-player>
+```
+
+不写 `track` 时，播放器会自动播放公开列表里的第一首歌。组件支持 CSS 变量定制，例如 `--qiaomu-player-accent`、`--qiaomu-player-bg`、`--qiaomu-player-text` 和 `--qiaomu-player-lyrics-height`。
+
+### iOS 客户端
+
+仓库内置一个 SwiftUI iPhone 客户端，默认连接 `https://music.qiaomu.ai` 的公开播放 API，也可以在设置页切到本地 `http://127.0.0.1:3068`。
+
+```bash
+open ios/QiaomuMusic/QiaomuMusic.xcodeproj
+```
+
+命令行验证：
+
+```bash
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphonesimulator build
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+```
+
+已验证能力：曲库拉取、真实封面加载、`AVPlayer` 串流播放、后台音频、锁屏控制、歌词接口和点按跳转。
+
+### 实测验证
+
+最近一次发布前执行过：
+
+```bash
+npm run check
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphonesimulator build
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+curl https://music.qiaomu.ai/api/public
+```
+
 ### Troubleshooting
 
 | 问题 | 解决方式 |
@@ -139,10 +195,14 @@ AI-generated songs often end up scattered across downloads, chat logs, and one-o
 
 Qiaomu Music Player Web turns that pile into a self-hosted web radio: a public player for listening, queueing, lyrics, and visual polish, plus an admin shelf for upload, metadata editing, preview, publishing, and unpublishing.
 
+The repository also includes a SwiftUI iPhone app that reads the public playback API and offers an Apple Music inspired browsing, search, lyrics, and playback experience.
+
 ### Features
 
 - Public radio UI with queue, lyrics, cover art, themes, and audio-reactive visuals.
 - Admin library for audio, cover art, lyrics, and metadata uploads.
+- SwiftUI iOS client with AVPlayer streaming, background audio, lock-screen controls, and tap-to-seek lyrics.
+- Public playback API for websites, mobile apps, and embeddable players.
 - Draft preview in admin, even when a track is not published.
 - Explicit publish and unpublish actions with visible feedback.
 - Local filesystem storage for music, covers, and metadata.
@@ -207,6 +267,52 @@ SCREENSHOT_URL=http://127.0.0.1:5173 npm run capture:screenshots
 ### Privacy Notes
 
 The public repository excludes uploaded audio, covers, real metadata, `.env` files, and generated Suno job folders.
+
+### Public Playback API
+
+Published tracks can be fetched and played from other websites. Public API responses use absolute URLs and include CORS headers.
+
+```bash
+curl http://127.0.0.1:3068/api/public
+curl http://127.0.0.1:3068/api/public/tracks
+curl http://127.0.0.1:3068/api/public/tracks/TRACK_ID
+curl http://127.0.0.1:3068/api/public/tracks/TRACK_ID/lyrics
+```
+
+Embeddable player:
+
+```html
+<script defer src="https://music.example.com/embed/player.js"></script>
+<qiaomu-music-player track="TRACK_ID"></qiaomu-music-player>
+```
+
+Omit `track` to load the first published track. Style the web component with CSS variables such as `--qiaomu-player-accent`, `--qiaomu-player-bg`, `--qiaomu-player-text`, and `--qiaomu-player-lyrics-height`.
+
+### iOS App
+
+The bundled SwiftUI iPhone app defaults to `https://music.qiaomu.ai` and can be switched to a local server from Settings.
+
+```bash
+open ios/QiaomuMusic/QiaomuMusic.xcodeproj
+```
+
+CLI validation:
+
+```bash
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphonesimulator build
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+```
+
+### Verification
+
+The current release was checked with:
+
+```bash
+npm run check
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphonesimulator build
+xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
+curl https://music.qiaomu.ai/api/public
+```
 
 ### Troubleshooting
 

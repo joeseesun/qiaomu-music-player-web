@@ -14,3 +14,8 @@ data/tracks.json
 
 suno-jobs/
 cover-redesigns/
+
+ios/**/xcuserdata/
+ios/**/DerivedData/
+ios/**/build/
+ios/**/screenshots/

@@ -63,6 +63,16 @@ function send(res, status, body, headers = {}) {
   res.end(payload);
 }
 
+function publicCorsHeaders(headers = {}) {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, HEAD, OPTIONS",
+    "access-control-allow-headers": "content-type, range",
+    "access-control-expose-headers": "content-length, content-range, accept-ranges",
+    ...headers
+  };
+}
+
 function cleanText(value, fallback = "") {
   const text = String(value || "").trim().replace(/\s+/g, " ");
   return text.slice(0, 160) || fallback;
@@ -97,6 +107,60 @@ function absoluteUrl(req, pathname) {
 function trackPath(track) {
   const shortCode = String(track.id || "").slice(0, 4).toLowerCase();
   return `/track/${encodeURIComponent(`${slugify(track.title)}-${shortCode}`)}`;
+}
+
+function parseLrcTime(raw) {
+  const match = /^(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?$/.exec(raw);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  const fraction = match[3] ? Number(`0.${match[3].padEnd(3, "0").slice(0, 3)}`) : 0;
+  return minutes * 60 + seconds + fraction;
+}
+
+function parseLyrics(lyrics = "") {
+  const lines = [];
+  String(lyrics || "").split(/\r?\n/).forEach((rawLine, index) => {
+    const trimmed = rawLine.trim();
+    if (!trimmed) return;
+    const stamps = [...trimmed.matchAll(/\[([0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?)\]/g)]
+      .map((match) => parseLrcTime(match[1]))
+      .filter((value) => value !== null);
+    const text = trimmed.replace(/\[[^\]]+\]/g, "").trim();
+    if (!text && stamps.length) return;
+    if (stamps.length) {
+      stamps.forEach((stamp) => lines.push({ id: `${index}-${stamp}-${text}`, text, time: stamp }));
+      return;
+    }
+    lines.push({ id: `${index}-${trimmed}`, text: trimmed });
+  });
+  return lines.sort((a, b) => (a.time ?? Number.MAX_SAFE_INTEGER) - (b.time ?? Number.MAX_SAFE_INTEGER));
+}
+
+function publicTrackDto(req, track) {
+  const pagePath = trackPath(track);
+  const audioUrl = track.url ? absoluteUrl(req, track.url) : "";
+  const coverUrl = track.coverUrl ? absoluteUrl(req, track.coverUrl) : "";
+  const apiPath = `/api/public/tracks/${encodeURIComponent(track.id)}`;
+  const lyricsPath = `${apiPath}/lyrics`;
+  return {
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    source: track.source,
+    size: track.size,
+    contentType: track.contentType,
+    createdAt: track.createdAt,
+    updatedAt: track.updatedAt,
+    pageUrl: absoluteUrl(req, pagePath),
+    audioUrl,
+    coverUrl,
+    apiUrl: absoluteUrl(req, apiPath),
+    lyricsUrl: absoluteUrl(req, lyricsPath),
+    embedScriptUrl: absoluteUrl(req, "/embed/player.js"),
+    embedHtml: `<qiaomu-music-player track="${escapeHtml(track.id)}"></qiaomu-music-player>`
+  };
 }
 
 async function ensureStorage() {
@@ -416,7 +480,7 @@ function serveFile(res, filePath, headers = {}) {
   stream.on("error", () => send(res, 404, "Not found"));
 }
 
-async function serveAudio(req, res, filePath) {
+async function serveAudio(req, res, filePath, headers = {}) {
   let stat;
   try {
     stat = await fsp.stat(filePath);
@@ -431,7 +495,8 @@ async function serveAudio(req, res, filePath) {
       "content-type": contentType,
       "content-length": stat.size,
       "cache-control": "public, max-age=31536000, immutable",
-      "accept-ranges": "bytes"
+      "accept-ranges": "bytes",
+      ...headers
     });
     fs.createReadStream(filePath).pipe(res);
     return;
@@ -449,13 +514,32 @@ async function serveAudio(req, res, filePath) {
     "content-length": end - start + 1,
     "content-range": `bytes ${start}-${end}/${stat.size}`,
     "cache-control": "public, max-age=31536000, immutable",
-    "accept-ranges": "bytes"
+    "accept-ranges": "bytes",
+    ...headers
   });
   fs.createReadStream(filePath, { start, end }).pipe(res);
 }
 
+async function serveEmbedPlayer(req, res) {
+  const builtFile = path.join(PUBLIC_DIR, "embed-player.js");
+  const sourceFile = path.join(__dirname, "public", "embed-player.js");
+  const filePath = fs.existsSync(builtFile) ? builtFile : sourceFile;
+  const script = await fsp.readFile(filePath, "utf8");
+  res.writeHead(200, publicCorsHeaders({
+    "content-type": "text/javascript; charset=utf-8",
+    "cache-control": "public, max-age=3600"
+  }));
+  res.end(script.replace("__QIAOMU_DEFAULT_BASE_URL__", absoluteUrl(req, "/").replace(/\/$/, "")));
+}
+
 async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  if (req.method === "OPTIONS" && (/^\/api\/public(?:\/|$)/.test(url.pathname) || url.pathname === "/embed/player.js")) {
+    res.writeHead(204, publicCorsHeaders());
+    res.end();
+    return;
+  }
 
   if (url.pathname === "/health") {
     send(res, 200, { ok: true, service: "qiaomu-music-player" });
@@ -487,6 +571,48 @@ async function route(req, res) {
 
   if (url.pathname === "/api/tracks") {
     send(res, 200, { tracks: await listTracks({ admin: false }) });
+    return;
+  }
+
+  if (url.pathname === "/api/public") {
+    const tracks = await listTracks({ admin: false });
+    send(res, 200, {
+      service: "qiaomu-music-player",
+      tracksUrl: absoluteUrl(req, "/api/public/tracks"),
+      embedScriptUrl: absoluteUrl(req, "/embed/player.js"),
+      trackCount: tracks.length
+    }, publicCorsHeaders());
+    return;
+  }
+
+  if (url.pathname === "/api/public/tracks") {
+    const tracks = await listTracks({ admin: false });
+    send(res, 200, { tracks: tracks.map((track) => publicTrackDto(req, track)) }, publicCorsHeaders());
+    return;
+  }
+
+  const publicTrackApiV1Match = /^\/api\/public\/tracks\/([^/]+)(?:\/(lyrics))?$/.exec(url.pathname);
+  if (publicTrackApiV1Match) {
+    const track = await findPublishedTrackByKey(decodeURIComponent(publicTrackApiV1Match[1]));
+    if (!track) {
+      send(res, 404, { error: "track_not_found" }, publicCorsHeaders());
+      return;
+    }
+    if (publicTrackApiV1Match[2] === "lyrics") {
+      send(res, 200, {
+        trackId: track.id,
+        lyrics: track.lyrics || "",
+        lines: parseLyrics(track.lyrics)
+      }, publicCorsHeaders());
+      return;
+    }
+    send(res, 200, {
+      track: {
+        ...publicTrackDto(req, track),
+        lyrics: track.lyrics || "",
+        lyricLines: parseLyrics(track.lyrics)
+      }
+    }, publicCorsHeaders());
     return;
   }
 
@@ -537,9 +663,14 @@ async function route(req, res) {
     return;
   }
 
+  if (url.pathname === "/embed/player.js") {
+    await serveEmbedPlayer(req, res);
+    return;
+  }
+
   if (url.pathname.startsWith("/music/")) {
     const safeName = path.basename(decodeURIComponent(url.pathname.replace("/music/", "")));
-    await serveAudio(req, res, path.join(MUSIC_DIR, safeName));
+    await serveAudio(req, res, path.join(MUSIC_DIR, safeName), publicCorsHeaders());
     return;
   }
 
@@ -547,7 +678,7 @@ async function route(req, res) {
     const safeName = path.basename(decodeURIComponent(url.pathname.replace("/covers/", "")));
     const filePath = path.join(COVER_DIR, safeName);
     const contentType = mimeByExt.get(path.extname(filePath).toLowerCase()) || "image/jpeg";
-    serveFile(res, filePath, { "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" });
+    serveFile(res, filePath, publicCorsHeaders({ "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" }));
     return;
   }
 
