@@ -16,6 +16,30 @@ final class MusicPlayer: ObservableObject {
     @Published var duration: Double = 0
     @Published var shuffleEnabled = true
     @Published var repeatEnabled = false
+    @Published var automaticCachingEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(automaticCachingEnabled, forKey: Self.cacheEnabledKey)
+            if automaticCachingEnabled, let activeTrack {
+                startCachingIfNeeded(activeTrack)
+                startCoverCachingIfNeeded(activeTrack)
+            }
+            if automaticCachingEnabled {
+                startLyricsIndexing(for: tracks)
+            } else {
+                lyricIndexTask?.cancel()
+                lyricIndexTask = nil
+            }
+        }
+    }
+    @Published var cachedTrackIDs = Set<String>()
+    @Published var cachedCoverTrackIDs = Set<String>()
+    @Published var cachedLyricTrackIDs = Set<String>()
+    @Published var cacheByteCount: Int64 = 0
+    @Published var cacheFileCount = 0
+    @Published var cacheCoverCount = 0
+    @Published var cacheLyricCount = 0
+    @Published var cacheStatus: String?
+    @Published private(set) var searchIndex: [String: String] = [:]
     @Published var volume: Double = 0.86 {
         didSet {
             player.volume = Float(volume)
@@ -29,17 +53,26 @@ final class MusicPlayer: ObservableObject {
     }
 
     private static let baseURLKey = "qiaomuMusicBaseURL"
+    private static let cacheEnabledKey = "qiaomuMusicAutomaticCachingEnabled"
     private let player = AVPlayer()
+    private let audioCache = AudioCacheStore()
     private var timeObserver: Any?
     private var itemEndObserver: NSObjectProtocol?
+    private var cacheTasks: [String: Task<Void, Never>] = [:]
+    private var coverCacheTasks: [String: Task<Void, Never>] = [:]
+    private var lyricIndexTask: Task<Void, Never>?
+    private var localCoverURLsByTrackID: [String: URL] = [:]
+    private var lyricTextByTrackID: [String: [String]] = [:]
 
     init() {
         baseURLString = UserDefaults.standard.string(forKey: Self.baseURLKey) ?? Self.productionBaseURL
+        automaticCachingEnabled = (UserDefaults.standard.object(forKey: Self.cacheEnabledKey) as? Bool) ?? true
         player.volume = Float(volume)
         configureAudioSession()
         installTimeObserver()
         installEndObserver()
         installRemoteCommands()
+        refreshCacheState()
     }
 
     deinit {
@@ -49,6 +82,7 @@ final class MusicPlayer: ObservableObject {
         if let itemEndObserver {
             NotificationCenter.default.removeObserver(itemEndObserver)
         }
+        lyricIndexTask?.cancel()
     }
 
     func loadCatalog() async {
@@ -57,30 +91,32 @@ final class MusicPlayer: ObservableObject {
         do {
             let api = QiaomuMusicAPI(baseURLString: baseURLString)
             let nextTracks = try await api.fetchTracks()
-            tracks = nextTracks
-            if activeTrack == nil {
-                activeTrack = nextTracks.first
-                if let first = nextTracks.first {
-                    await loadLyrics(for: first)
-                }
-            } else if let activeTrack,
-                      let refreshed = nextTracks.first(where: { $0.id == activeTrack.id }) {
-                self.activeTrack = refreshed
-                await loadLyrics(for: refreshed)
-            }
+            try? audioCache.saveCatalog(nextTracks)
+            await adoptCatalog(nextTracks)
             status = nextTracks.isEmpty ? "当前站点还没有已发布歌曲。" : nil
         } catch {
-            status = error.localizedDescription
+            let offlineTracks = (try? audioCache.loadCatalog()) ?? []
+            if offlineTracks.isEmpty {
+                status = error.localizedDescription
+            } else {
+                await adoptCatalog(offlineTracks)
+                status = "离线模式：显示上次同步的曲库。已缓存歌曲可直接播放。"
+            }
         }
+        refreshCacheState()
         isLoading = false
     }
 
     func setBaseURL(_ value: String) async {
         baseURLString = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        lyricIndexTask?.cancel()
+        lyricIndexTask = nil
         stop()
         tracks = []
         activeTrack = nil
         lyricLines = []
+        searchIndex = [:]
+        lyricTextByTrackID = [:]
         await loadCatalog()
     }
 
@@ -101,6 +137,8 @@ final class MusicPlayer: ObservableObject {
         }
         player.play()
         isPlaying = true
+        startCachingIfNeeded(activeTrack)
+        startCoverCachingIfNeeded(activeTrack)
         updateNowPlayingInfo()
     }
 
@@ -117,6 +155,10 @@ final class MusicPlayer: ObservableObject {
     func stop() {
         player.pause()
         player.replaceCurrentItem(with: nil)
+        cacheTasks.values.forEach { $0.cancel() }
+        cacheTasks.removeAll()
+        coverCacheTasks.values.forEach { $0.cancel() }
+        coverCacheTasks.removeAll()
         isPlaying = false
         currentTime = 0
         duration = 0
@@ -181,19 +223,102 @@ final class MusicPlayer: ObservableObject {
         duration = 0
         lyricLines = []
         preparePlayer(for: track)
+        startCoverCachingIfNeeded(track)
         Task {
             await loadLyrics(for: track)
         }
     }
 
+    func isCached(_ track: PublicTrack) -> Bool {
+        cachedTrackIDs.contains(track.id)
+    }
+
+    func localCoverURL(for track: PublicTrack?) -> URL? {
+        guard let track else { return nil }
+        return localCoverURLsByTrackID[track.id]
+    }
+
+    func ensureCoverCached(_ track: PublicTrack) {
+        startCoverCachingIfNeeded(track)
+    }
+
+    func searchTracks(matching query: String) -> [PublicTrack] {
+        let terms = Self.normalizedSearchTerms(query)
+        guard !terms.isEmpty else { return tracks }
+        return tracks.filter { track in
+            let text = searchIndex[track.id] ?? fallbackSearchText(for: track)
+            return terms.allSatisfy { text.contains($0) }
+        }
+    }
+
+    func lyricSnippet(for track: PublicTrack, matching query: String) -> String? {
+        let terms = Self.normalizedSearchTerms(query)
+        guard !terms.isEmpty else { return nil }
+
+        return lyricTextByTrackID[track.id]?.first { line in
+            let text = Self.normalizedSearchText(line)
+            return terms.contains { text.contains($0) }
+        }
+    }
+
+    func clearAudioCache() {
+        cacheTasks.values.forEach { $0.cancel() }
+        cacheTasks.removeAll()
+        coverCacheTasks.values.forEach { $0.cancel() }
+        coverCacheTasks.removeAll()
+        lyricIndexTask?.cancel()
+        lyricIndexTask = nil
+        do {
+            try audioCache.clear()
+            cacheStatus = "已清理音频、封面和歌词缓存。"
+            refreshCacheState()
+            rebuildSearchIndex()
+            startLyricsIndexing(for: tracks)
+        } catch {
+            cacheStatus = "清理失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func adoptCatalog(_ nextTracks: [PublicTrack]) async {
+        tracks = nextTracks
+        rebuildSearchIndex()
+        if activeTrack == nil {
+            activeTrack = nextTracks.first
+            if let first = nextTracks.first {
+                await loadLyrics(for: first)
+            }
+        } else if let activeTrack,
+                  let refreshed = nextTracks.first(where: { $0.id == activeTrack.id }) {
+            self.activeTrack = refreshed
+            await loadLyrics(for: refreshed)
+        }
+        refreshCacheState()
+        if let activeTrack {
+            startCoverCachingIfNeeded(activeTrack)
+        }
+        startLyricsIndexing(for: nextTracks)
+    }
+
     private func loadLyrics(for track: PublicTrack) async {
+        if let cached = audioCache.cachedLyrics(for: track), !cached.isEmpty {
+            if activeTrack?.id == track.id {
+                lyricLines = cached
+            }
+            updateSearchIndex(for: track, preferredLyrics: cached)
+            refreshCacheState()
+            return
+        }
+
         do {
             let api = QiaomuMusicAPI(baseURLString: baseURLString)
             let detail = try? await api.fetchTrackDetail(track)
             let lines = try await api.fetchLyrics(for: detail ?? track)
+            try? audioCache.saveLyrics(lines, for: track)
             if activeTrack?.id == track.id {
                 lyricLines = lines
             }
+            updateSearchIndex(for: track, preferredLyrics: lines)
+            refreshCacheState()
         } catch {
             if activeTrack?.id == track.id {
                 lyricLines = []
@@ -206,10 +331,214 @@ final class MusicPlayer: ObservableObject {
             status = QiaomuMusicAPIError.missingAudioURL.localizedDescription
             return
         }
-        let item = AVPlayerItem(url: audioURL)
+        let cachedURL = audioCache.localURL(for: track)
+        let item = AVPlayerItem(url: cachedURL ?? audioURL)
         player.replaceCurrentItem(with: item)
         player.volume = Float(volume)
+        cacheStatus = cachedURL == nil ? nil : "离线播放：\(track.title)"
         updateNowPlayingInfo()
+    }
+
+    private func startCachingIfNeeded(_ track: PublicTrack) {
+        guard automaticCachingEnabled else { return }
+        if audioCache.localURL(for: track) != nil {
+            refreshCacheState()
+            return
+        }
+        guard cacheTasks[track.id] == nil else { return }
+
+        cacheStatus = "正在缓存：\(track.title)"
+        let task = Task { [weak self, audioCache] in
+            do {
+                _ = try await audioCache.cache(track)
+                await MainActor.run {
+                    self?.finishCaching(track, error: nil)
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self?.cacheTasks[track.id] = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self?.finishCaching(track, error: error)
+                }
+            }
+        }
+        cacheTasks[track.id] = task
+    }
+
+    private func startCoverCachingIfNeeded(_ track: PublicTrack) {
+        guard automaticCachingEnabled, track.coverURL != nil else { return }
+        if cachedCoverTrackIDs.contains(track.id) {
+            return
+        }
+        guard coverCacheTasks[track.id] == nil else { return }
+
+        let task = Task { [weak self, audioCache] in
+            do {
+                _ = try await audioCache.cacheCover(track)
+                await MainActor.run {
+                    self?.coverCacheTasks[track.id] = nil
+                    self?.refreshCacheState()
+                }
+            } catch {
+                await MainActor.run {
+                    self?.coverCacheTasks[track.id] = nil
+                }
+            }
+        }
+        coverCacheTasks[track.id] = task
+    }
+
+    private func startLyricsIndexing(for tracks: [PublicTrack]) {
+        guard automaticCachingEnabled, !tracks.isEmpty else { return }
+        lyricIndexTask?.cancel()
+
+        let baseURLString = baseURLString
+        lyricIndexTask = Task(priority: .utility) { [weak self, audioCache] in
+            let api = QiaomuMusicAPI(baseURLString: baseURLString)
+
+            for track in tracks {
+                guard !Task.isCancelled else { return }
+
+                if let cached = audioCache.cachedLyrics(for: track), !cached.isEmpty {
+                    await MainActor.run {
+                        self?.updateSearchIndex(for: track, preferredLyrics: cached)
+                        self?.cachedLyricTrackIDs.insert(track.id)
+                    }
+                    continue
+                }
+
+                do {
+                    let lines = try await api.fetchLyrics(for: track)
+                    try? audioCache.saveLyrics(lines, for: track)
+                    await MainActor.run {
+                        guard self?.tracks.contains(where: { $0.id == track.id }) == true else { return }
+                        self?.updateSearchIndex(for: track, preferredLyrics: lines)
+                        self?.cachedLyricTrackIDs.insert(track.id)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    continue
+                }
+            }
+
+            await MainActor.run {
+                self?.lyricIndexTask = nil
+                self?.refreshCacheState()
+            }
+        }
+    }
+
+    private func finishCaching(_ track: PublicTrack, error: Error?) {
+        cacheTasks[track.id] = nil
+        refreshCacheState()
+        guard activeTrack?.id == track.id else { return }
+        if let error {
+            cacheStatus = "缓存失败：\(error.localizedDescription)"
+        } else {
+            cacheStatus = "已离线缓存：\(track.title)"
+        }
+    }
+
+    private func refreshCacheState() {
+        let snapshot = audioCache.snapshot()
+        cacheFileCount = snapshot.audioFileCount
+        cacheCoverCount = snapshot.coverFileCount
+        cacheLyricCount = snapshot.lyricFileCount
+        cacheByteCount = snapshot.byteCount
+        localCoverURLsByTrackID = audioCache.localCoverURLs(for: tracks)
+        cachedTrackIDs = Set(tracks.filter { audioCache.localURL(for: $0) != nil }.map(\.id))
+        cachedCoverTrackIDs = Set(localCoverURLsByTrackID.keys)
+        cachedLyricTrackIDs = Set(tracks.filter { audioCache.hasCachedLyrics(for: $0) }.map(\.id))
+    }
+
+    private func rebuildSearchIndex() {
+        var nextIndex: [String: String] = [:]
+        var nextLyricText: [String: [String]] = [:]
+        for track in tracks {
+            let entry = searchEntry(for: track)
+            nextIndex[track.id] = entry.searchText
+            nextLyricText[track.id] = entry.lyricText
+        }
+        searchIndex = nextIndex
+        lyricTextByTrackID = nextLyricText
+    }
+
+    private func updateSearchIndex(for track: PublicTrack, preferredLyrics: [LyricLine]) {
+        let entry = searchEntry(for: track, preferredLyrics: preferredLyrics)
+        searchIndex[track.id] = entry.searchText
+        lyricTextByTrackID[track.id] = entry.lyricText
+    }
+
+    private func searchEntry(
+        for track: PublicTrack,
+        preferredLyrics: [LyricLine]? = nil,
+        includeCachedLyrics: Bool = false
+    ) -> (searchText: String, lyricText: [String]) {
+        let lyricText = lyricSearchText(
+            for: track,
+            preferredLyrics: preferredLyrics,
+            includeCachedLyrics: includeCachedLyrics
+        )
+        let components = [
+            track.title,
+            track.artist,
+            track.album,
+            track.source,
+            track.lyrics ?? "",
+            lyricText.joined(separator: " ")
+        ]
+        return (Self.normalizedSearchText(components.joined(separator: " ")), lyricText)
+    }
+
+    private func lyricSearchText(
+        for track: PublicTrack,
+        preferredLyrics: [LyricLine]? = nil,
+        includeCachedLyrics: Bool = false
+    ) -> [String] {
+        var values: [String] = []
+        values.append(contentsOf: track.lyricLines?.map(\.text) ?? [])
+        values.append(contentsOf: track.lyrics?.components(separatedBy: .newlines) ?? [])
+        if activeTrack?.id == track.id, !lyricLines.isEmpty {
+            values.append(contentsOf: lyricLines.map(\.text))
+        }
+        if let preferredLyrics {
+            values.append(contentsOf: preferredLyrics.map(\.text))
+        } else if includeCachedLyrics {
+            values.append(contentsOf: audioCache.cachedLyrics(for: track)?.map(\.text) ?? [])
+        }
+        return uniqueNonEmpty(values)
+    }
+
+    private func uniqueNonEmpty(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let key = Self.normalizedSearchText(trimmed)
+            guard !seen.contains(key) else { return nil }
+            seen.insert(key)
+            return trimmed
+        }
+    }
+
+    private func fallbackSearchText(for track: PublicTrack) -> String {
+        Self.normalizedSearchText([track.title, track.artist, track.album, track.source].joined(separator: " "))
+    }
+
+    private static func normalizedSearchTerms(_ value: String) -> [String] {
+        let normalized = normalizedSearchText(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        return normalized
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+    }
+
+    private static func normalizedSearchText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
     }
 
     private func configureAudioSession() {

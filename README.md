@@ -27,13 +27,13 @@
 
 Qiaomu Music Player Web 把它们放进一个可以自托管的网页电台：前台负责播放、队列、歌词和视觉动效，后台负责上传、编辑、试听、发布和下架。
 
-如果你只想听歌，也可以用仓库里的 SwiftUI iPhone 客户端读取公开播放 API，像 Apple Music 一样浏览、搜索和播放自己的 AI 歌曲库。
+如果你只想听歌，也可以用仓库里的 SwiftUI iPhone 客户端读取公开播放 API，像 Apple Music 一样浏览、搜索、缓存音频/封面/歌词并播放自己的 AI 歌曲库。
 
 ### 核心功能
 
 - 电台前台：播放队列、封面、歌词滚动、主题配色和声纹动效。
 - 后台曲库：上传音频、封面、歌词和元数据。
-- iOS 客户端：SwiftUI、AVPlayer、锁屏控制、后台播放、歌词点按跳转。
+- iOS 客户端：SwiftUI、AVPlayer、音频/封面/歌词离线缓存、锁屏控制、后台播放、歌词点按跳转。
 - 公开播放 API：已发布歌曲可被其他网站、移动客户端和嵌入组件读取。
 - 草稿试听：后台未发布歌曲也可以试听，不影响前台电台。
 - 发布控制：一键发布或取消发布，并给出明确反馈。
@@ -147,7 +147,7 @@ curl http://127.0.0.1:3068/api/public/tracks/TRACK_ID/lyrics
 
 ### iOS 客户端
 
-仓库内置一个 SwiftUI iPhone 客户端，默认连接 `https://music.qiaomu.ai` 的公开播放 API，也可以在设置页切到本地 `http://127.0.0.1:3068`。
+仓库内置一个 SwiftUI iPhone 客户端，默认连接 `https://music.qiaomu.ai` 的公开播放 API，也可以在设置页切到本地 `http://127.0.0.1:3068`。App 会自动缓存音频、封面和歌词，下次同一首歌优先使用本地文件，设置页可查看和清理离线缓存。
 
 ```bash
 open ios/QiaomuMusic/QiaomuMusic.xcodeproj
@@ -160,7 +160,7 @@ xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -c
 xcodebuild -project ios/QiaomuMusic/QiaomuMusic.xcodeproj -target QiaomuMusic -configuration Debug -sdk iphoneos CODE_SIGNING_ALLOWED=NO build
 ```
 
-已验证能力：曲库拉取、真实封面加载、`AVPlayer` 串流播放、后台音频、锁屏控制、歌词接口和点按跳转。
+已验证能力：曲库拉取、真实封面加载、`AVPlayer` 串流播放、音频/封面/歌词离线缓存、后台音频、锁屏控制、歌词接口和点按跳转。
 
 ### 实测验证
 
@@ -195,13 +195,13 @@ AI-generated songs often end up scattered across downloads, chat logs, and one-o
 
 Qiaomu Music Player Web turns that pile into a self-hosted web radio: a public player for listening, queueing, lyrics, and visual polish, plus an admin shelf for upload, metadata editing, preview, publishing, and unpublishing.
 
-The repository also includes a SwiftUI iPhone app that reads the public playback API and offers an Apple Music inspired browsing, search, lyrics, and playback experience.
+The repository also includes a SwiftUI iPhone app that reads the public playback API and offers an Apple Music inspired browsing, title/lyrics search, audio/cover/lyrics cache, lyrics, and playback experience.
 
 ### Features
 
 - Public radio UI with queue, lyrics, cover art, themes, and audio-reactive visuals.
 - Admin library for audio, cover art, lyrics, and metadata uploads.
-- SwiftUI iOS client with AVPlayer streaming, background audio, lock-screen controls, and tap-to-seek lyrics.
+- SwiftUI iOS client with AVPlayer streaming, lazy audio/cover/lyrics cache, title/lyrics search, background audio, lock-screen controls, and tap-to-seek lyrics.
 - Public playback API for websites, mobile apps, and embeddable players.
 - Draft preview in admin, even when a track is not published.
 - Explicit publish and unpublish actions with visible feedback.
@@ -290,7 +290,7 @@ Omit `track` to load the first published track. Style the web component with CSS
 
 ### iOS App
 
-The bundled SwiftUI iPhone app defaults to `https://music.qiaomu.ai` and can be switched to a local server from Settings.
+The bundled SwiftUI iPhone app defaults to `https://music.qiaomu.ai`, can be switched to a local server from Settings, searches song titles and locally cached/loaded lyrics, and automatically caches played audio, lazily loaded cover art, and lyrics for later offline use.
 
 ```bash
 open ios/QiaomuMusic/QiaomuMusic.xcodeproj

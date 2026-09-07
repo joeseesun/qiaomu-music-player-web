@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>乔木音乐支持</title>
+    <style>
+      :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; }
+      body { margin: 0; background: #f6f3ee; color: #25211d; }
+      main { max-width: 720px; margin: 0 auto; padding: 64px 24px 96px; }
+      h1 { margin: 0 0 12px; font-size: clamp(32px, 7vw, 52px); letter-spacing: -0.04em; }
+      .lead { color: #746c63; font-size: 19px; line-height: 1.65; }
+      section { margin-top: 40px; padding-top: 28px; border-top: 1px solid rgba(116, 108, 99, .25); }
+      h2 { margin: 0 0 12px; font-size: 20px; }
+      p, li { font-size: 17px; line-height: 1.8; }
+      a { color: #a2472b; }
+      @media (prefers-color-scheme: dark) { body { background: #191714; color: #eee8df; } .lead { color: #aaa096; } a { color: #e28a68; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>乔木音乐支持</h1>
+      <p class="lead">乔木创作的 AI 音乐播放器，支持公开曲库、同步歌词、后台播放和本地缓存。</p>
+      <section>
+        <h2>常见问题</h2>
+        <p><strong>曲目加载不出来：</strong>请确认网络可用，然后回到“资料库”下拉刷新。仍无法加载时，可在“设置”中确认服务地址为 https://music.qiaomu.ai。</p>
+        <p><strong>无法后台播放：</strong>请先在应用内开始播放，再锁屏或切换应用；系统的锁屏播放器可继续控制播放。</p>
+        <p><strong>缓存占用空间：</strong>应用会缓存播放过的音频、封面和歌词。可以在“设置”中查看并清理全部缓存。</p>
+      </section>
+      <section>
+        <h2>联系我们</h2>
+        <p>请将问题、设备型号、iOS 版本和复现步骤发送至 <a href="mailto:joe@qiaomu.ai">joe@qiaomu.ai</a>。我们通常会在 3 个工作日内回复。</p>
+        <p><a href="/privacy/">查看隐私政策</a> · <a href="https://github.com/joeseesun/qiaomu-music-player-web/issues">GitHub Issues</a></p>
+      </section>
+    </main>
+  </body>
+</html>

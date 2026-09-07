@@ -13,9 +13,10 @@
 
 - 拉取 `GET /api/public/tracks` 的公开曲库。
 - 使用 `AVPlayer` 串流播放 `audioUrl`，支持后台音频和锁屏控制。
+- 自动缓存播放过的音频、封面和歌词，下次同一首歌优先离线播放和离线展示。
 - 从 `lyricsUrl` 获取同步歌词，支持点按有时间戳的歌词跳转。
 - Apple Music 风格结构：资料库、搜索、底部 mini player、全屏正在播放页。
-- 设置页可在 `https://music.qiaomu.ai` 和本地 `http://127.0.0.1:3068` 之间切换。
+- 设置页可在 `https://music.qiaomu.ai` 和本地 `http://127.0.0.1:3068` 之间切换，并支持查看/清理音频、封面、歌词缓存。
 
 ### 运行
 
@@ -43,9 +44,11 @@ This app defaults to `https://music.qiaomu.ai`, loads published tracks from `GET
 
 - Loads published tracks from `GET /api/public/tracks`.
 - Streams `audioUrl` with `AVPlayer`, including lock-screen/background audio support.
+- Automatically caches played audio, lazily cached cover art, and lyrics, then prefers local media on later plays.
+- Searches song titles, metadata, and cached or background-indexed lyrics from a prebuilt local index.
 - Fetches synced lyrics from `lyricsUrl` and supports tap-to-seek on timed lyric lines.
 - Uses an Apple Music inspired layout: library, search, mini player, and full now-playing screen.
-- Defaults to `https://music.qiaomu.ai`, with a settings sheet for local development.
+- Defaults to `https://music.qiaomu.ai`, with settings for local development and audio/cover/lyrics cache management.
 
 ## Run
 

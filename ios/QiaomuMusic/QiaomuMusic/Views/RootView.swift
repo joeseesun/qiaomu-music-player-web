@@ -4,38 +4,17 @@ struct RootView: View {
     @EnvironmentObject private var player: MusicPlayer
     @State private var selectedTab = 0
     @State private var showingSettings = false
+    @State private var showingNowPlaying = false
 
     var body: some View {
         ZStack {
             AppBackground()
-            TabView(selection: $selectedTab) {
-                LibraryView(showingSettings: $showingSettings, selectedTab: $selectedTab)
-                    .tabItem {
-                        Label("资料库", systemImage: "music.note.list")
-                    }
-                    .tag(0)
-
-                SearchView(selectedTab: $selectedTab)
-                    .tabItem {
-                        Label("搜索", systemImage: "magnifyingglass")
-                    }
-                    .tag(1)
-
-                NowPlayingView()
-                    .tabItem {
-                        Label("播放", systemImage: "play.circle.fill")
-                    }
-                    .tag(2)
-            }
-            .tint(Color.qmAccent)
-            .preferredColorScheme(.dark)
+            tabLayout
         }
-        .safeAreaInset(edge: .bottom) {
-            if selectedTab != 2, player.activeTrack != nil {
-                MiniPlayer(selectedTab: $selectedTab)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 6)
-            }
+        .sheet(isPresented: $showingNowPlaying) {
+            NowPlayingView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView()
@@ -47,6 +26,56 @@ struct RootView: View {
                 await player.loadCatalog()
             }
         }
+    }
+
+    @ViewBuilder
+    private var tabLayout: some View {
+        if #available(iOS 26.1, *) {
+            tabs
+                .tabViewBottomAccessory(isEnabled: player.activeTrack != nil) {
+                    MiniPlayer(showingNowPlaying: $showingNowPlaying, showsChrome: false)
+                        .padding(.horizontal, 14)
+                }
+        } else {
+            ZStack(alignment: .bottom) {
+                tabs
+
+                if player.activeTrack != nil {
+                    MiniPlayer(showingNowPlaying: $showingNowPlaying)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 56)
+                }
+            }
+        }
+    }
+
+    private var tabs: some View {
+        TabView(selection: $selectedTab) {
+            LibraryView(showingSettings: $showingSettings, showingNowPlaying: $showingNowPlaying)
+                .tabItem {
+                    Image(systemName: "house.fill")
+                        .accessibilityLabel("主页")
+                }
+                .tag(0)
+
+            MusicLibraryView(showingNowPlaying: $showingNowPlaying)
+                .tabItem {
+                    Image(systemName: "music.note.list")
+                        .accessibilityLabel("资料库")
+                }
+                .tag(1)
+
+            SearchView(showingNowPlaying: $showingNowPlaying)
+                .tabItem {
+                    Image(systemName: "magnifyingglass")
+                        .accessibilityLabel("搜索")
+                }
+                .tag(2)
+        }
+        .tint(Color.qmAccent)
+        .toolbarBackground(.visible, for: .tabBar)
+        .toolbarBackground(.ultraThinMaterial, for: .tabBar)
+        .preferredColorScheme(.dark)
     }
 }
 

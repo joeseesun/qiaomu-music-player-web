@@ -18,7 +18,12 @@ struct NowPlayingView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    ArtworkView(track: player.activeTrack, size: 312, cornerRadius: 24)
+                    ArtworkView(
+                        track: player.activeTrack,
+                        localCoverURL: player.localCoverURL(for: player.activeTrack),
+                        size: 312,
+                        cornerRadius: 24
+                    )
                         .shadow(color: .black.opacity(0.42), radius: 28, y: 20)
                         .padding(.top, 24)
 
@@ -32,6 +37,7 @@ struct NowPlayingView: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        cachePill
                     }
                     .padding(.horizontal, 22)
 
@@ -51,6 +57,19 @@ struct NowPlayingView: View {
     private var subtitle: String {
         guard let track = player.activeTrack else { return "乔木音乐" }
         return [track.artist, track.album, track.source].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var cachePill: some View {
+        if let track = player.activeTrack {
+            let cached = player.isCached(track)
+            Label(cached ? "已缓存" : (player.automaticCachingEnabled ? "自动缓存" : "在线播放"), systemImage: cached ? "arrow.down.circle.fill" : "antenna.radiowaves.left.and.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(cached ? Color.qmCyan : Color.qmGold)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.08), in: Capsule())
+        }
     }
 
     private var progress: some View {
