@@ -37,6 +37,25 @@ struct SettingsView: View {
                     Toggle("单曲循环", isOn: $player.repeatEnabled)
                 }
 
+                Section("离线缓存") {
+                    Toggle("自动缓存媒体", isOn: $player.automaticCachingEnabled)
+                    LabeledContent("音频", value: "\(player.cacheFileCount) 首")
+                    LabeledContent("封面", value: "\(player.cacheCoverCount) 张")
+                    LabeledContent("歌词", value: "\(player.cacheLyricCount) 份")
+                    LabeledContent("占用", value: qmFormatBytes(player.cacheByteCount))
+                    Button(role: .destructive) {
+                        player.clearAudioCache()
+                    } label: {
+                        Label("清理缓存", systemImage: "trash")
+                    }
+                    .disabled(player.cacheFileCount + player.cacheCoverCount + player.cacheLyricCount == 0)
+                    if let cacheStatus = player.cacheStatus {
+                        Text(cacheStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("当前状态") {
                     LabeledContent("曲库", value: "\(player.tracks.count) 首")
                     LabeledContent("站点", value: player.baseURLString)

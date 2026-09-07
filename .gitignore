@@ -17,5 +17,6 @@ cover-redesigns/
 
 ios/**/xcuserdata/
 ios/**/DerivedData/
+ios/**/DerivedData*/
 ios/**/build/
 ios/**/screenshots/

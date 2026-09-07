@@ -1,6 +1,6 @@
 import Foundation
 
-struct PublicTrack: Decodable, Identifiable, Equatable {
+struct PublicTrack: Codable, Identifiable, Equatable {
     let id: String
     let title: String
     let artist: String
@@ -35,7 +35,7 @@ struct PublicTrack: Decodable, Identifiable, Equatable {
     }
 }
 
-struct LyricLine: Decodable, Identifiable, Equatable {
+struct LyricLine: Codable, Identifiable, Equatable {
     let id: String
     let text: String
     let time: Double?
@@ -73,4 +73,12 @@ func qmFormatTime(_ value: Double) -> String {
     guard value.isFinite, value >= 0 else { return "0:00" }
     let total = Int(value.rounded(.down))
     return "\(total / 60):\(String(format: "%02d", total % 60))"
+}
+
+func qmFormatBytes(_ value: Int64) -> String {
+    guard value > 0 else { return "0 KB" }
+    let formatter = ByteCountFormatter()
+    formatter.allowedUnits = [.useKB, .useMB, .useGB]
+    formatter.countStyle = .file
+    return formatter.string(fromByteCount: value)
 }
