@@ -18,3 +18,14 @@
 - Verified: both HTTPS pages return `200` with the expected title and contact address; systemd service remains active; port `3068` remains bound; public API returns 48 published tracks.
 - Remaining: wait for Apple build processing, complete App Store metadata/privacy/content-rights/age-rating fields, select build 2, and submit for review after the owner confirms Suno commercial-use eligibility and final attestations.
 - Scope: this is a narrow App Store release dependency update. Existing homepage/PWA/analytics/social affordances are left unchanged; no new growth features are introduced in this deployment.
+
+## 2026-09-07 17:57 SGT
+
+- Submitted Qiaomu Music iOS 1.0 (build 2, bundle `ai.qiaomu.music`) to Apple App Review.
+- App Store Connect readback: `Waiting for Review`; 1 item submitted by 向阳 乔 at 17:57 SGT.
+- Release mode: automatically release after App Review approval.
+- Store configuration: free in all currencies; available in 147 countries or regions; excluded from the European Union and China mainland.
+- Review materials: three 6.5-inch iPhone screenshots, Simplified Chinese metadata, support and marketing URLs, reviewer contact details, review notes, build 2, content-rights declaration, age rating, and published privacy response.
+- Privacy declaration: Data Not Collected; privacy policy `https://music.qiaomu.ai/privacy/`.
+- Content-rights basis confirmed by the owner: all 48 songs were generated during an active paid Suno subscription, with no third-party remix or unauthorized audio, and the lyrics and cover art are authorized for use.
+- Next external step: wait for Apple review. App Store Connect says review can take up to 48 hours and will email the account when complete.
