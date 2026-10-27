@@ -185,7 +185,8 @@ class Worker:
         script = Path(__file__).with_name('studio-browser.js').read_text()
         script = 'const studioInput = ' + json.dumps({'folder': str(folder), 'jobId': job['id'], 'check': check}) + ';\n' + script
         result = subprocess.run(['ego-browser', 'nodejs'], input=script, capture_output=True, text=True, timeout=150)
-        for line in reversed(result.stdout.splitlines()):
+        # Ego Lite writes Node console output to stderr in its native CLI.
+        for line in reversed((result.stdout + '\n' + result.stderr).splitlines()):
             if line.startswith('QM_BROWSER_RESULT='):
                 value = json.loads(line.split('=', 1)[1])
                 if value.get('ids'):
