@@ -122,33 +122,7 @@ function trackPath(track) {
   return `/track/${encodeURIComponent(`${slugify(track.title)}-${shortCode}`)}`;
 }
 
-function parseLrcTime(raw) {
-  const match = /^(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?$/.exec(raw);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  const fraction = match[3] ? Number(`0.${match[3].padEnd(3, "0").slice(0, 3)}`) : 0;
-  return minutes * 60 + seconds + fraction;
-}
-
-function parseLyrics(lyrics = "") {
-  const lines = [];
-  String(lyrics || "").split(/\r?\n/).forEach((rawLine, index) => {
-    const trimmed = rawLine.trim();
-    if (!trimmed) return;
-    const stamps = [...trimmed.matchAll(/\[([0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?)\]/g)]
-      .map((match) => parseLrcTime(match[1]))
-      .filter((value) => value !== null);
-    const text = trimmed.replace(/\[[^\]]+\]/g, "").trim();
-    if (!text && stamps.length) return;
-    if (stamps.length) {
-      stamps.forEach((stamp) => lines.push({ id: `${index}-${stamp}-${text}`, text, time: stamp }));
-      return;
-    }
-    lines.push({ id: `${index}-${trimmed}`, text: trimmed });
-  });
-  return lines.sort((a, b) => (a.time ?? Number.MAX_SAFE_INTEGER) - (b.time ?? Number.MAX_SAFE_INTEGER));
-}
+let parseLyrics;
 
 function publicTrackDto(req, track) {
   const pagePath = trackPath(track);
@@ -805,12 +779,13 @@ async function route(req, res) {
     return;
   }
   const ext = path.extname(filePath);
-  const contentType = ext === ".css" ? "text/css; charset=utf-8" : ext === ".js" ? "text/javascript; charset=utf-8" : ext === ".svg" ? "image/svg+xml" : "text/html; charset=utf-8";
+  const contentType = ext === ".css" ? "text/css; charset=utf-8" : (ext === ".js" || ext === ".mjs") ? "text/javascript; charset=utf-8" : ext === ".svg" ? "image/svg+xml" : "text/html; charset=utf-8";
   const cacheControl = path.basename(filePath) === "index.html" ? "no-cache" : "public, max-age=31536000, immutable";
-  serveFile(res, filePath, { "content-type": contentType, "cache-control": cacheControl });
+  serveFile(res, filePath, { "content-type": contentType, "cache-control": cacheControl, ...(ext === ".mjs" ? publicCorsHeaders() : {}) });
 }
 
 ensureStorage().then(async () => {
+  ({ parseLyrics } = await import("./public/lyrics.mjs"));
   await studio.init();
   if (process.env.STUDIO_SCHEDULE !== 'off') studio.start();
   const server = http.createServer((req, res) => {

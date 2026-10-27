@@ -1,4 +1,4 @@
-(function () {
+(async function () {
   const currentScript = document.currentScript;
   const scriptUrl = currentScript && currentScript.src ? new URL(currentScript.src, window.location.href) : null;
   const defaultBase = scriptUrl ? scriptUrl.origin : "__QIAOMU_DEFAULT_BASE_URL__";
@@ -10,31 +10,7 @@
     return `${minutes}:${seconds}`;
   };
 
-  const parseLrcTime = (raw) => {
-    const match = /^(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?$/.exec(raw);
-    if (!match) return null;
-    const fraction = match[3] ? Number(`0.${match[3].padEnd(3, "0").slice(0, 3)}`) : 0;
-    return Number(match[1]) * 60 + Number(match[2]) + fraction;
-  };
-
-  const parseLyrics = (lyrics = "") => {
-    const lines = [];
-    String(lyrics || "").split(/\r?\n/).forEach((rawLine, index) => {
-      const trimmed = rawLine.trim();
-      if (!trimmed) return;
-      const stamps = [...trimmed.matchAll(/\[([0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?)\]/g)]
-        .map((match) => parseLrcTime(match[1]))
-        .filter((value) => value !== null);
-      const text = trimmed.replace(/\[[^\]]+\]/g, "").trim();
-      if (!text && stamps.length) return;
-      if (stamps.length) {
-        stamps.forEach((stamp) => lines.push({ id: `${index}-${stamp}-${text}`, text, time: stamp }));
-      } else {
-        lines.push({ id: `${index}-${trimmed}`, text: trimmed });
-      }
-    });
-    return lines.sort((a, b) => (a.time ?? Number.MAX_SAFE_INTEGER) - (b.time ?? Number.MAX_SAFE_INTEGER));
-  };
+  const { parseLyrics } = await import(`${defaultBase}/lyrics.mjs?v=1`);
 
   const getActiveLine = (lines, time, duration) => {
     if (!lines.length) return 0;

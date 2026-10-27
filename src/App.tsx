@@ -1,3 +1,5 @@
+import { audioCache } from '../public/audio-cache.mjs';
+import { parseLyrics } from '../public/lyrics.mjs';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, TouchEvent } from "react";
 import Coverflow from "react-coverflow";
@@ -221,34 +223,6 @@ const makeWave = (seed: string) => {
   });
 };
 
-const parseLrcTime = (raw: string) => {
-  const match = raw.match(/^(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?$/);
-  if (!match) return null;
-  const minutes = Number(match[1]);
-  const seconds = Number(match[2]);
-  const fraction = match[3] ? Number(`0.${match[3].padEnd(3, "0").slice(0, 3)}`) : 0;
-  return minutes * 60 + seconds + fraction;
-};
-
-const parseLyrics = (lyrics = ""): LyricLine[] => {
-  const lines: LyricLine[] = [];
-  lyrics.split(/\r?\n/).forEach((rawLine, index) => {
-    const trimmed = rawLine.trim();
-    if (!trimmed) return;
-    const stamps = [...trimmed.matchAll(/\[([0-9]{1,2}:[0-9]{2}(?:[.:][0-9]{1,3})?)\]/g)]
-      .map((match) => parseLrcTime(match[1]))
-      .filter((value): value is number => value !== null);
-    const text = trimmed.replace(/\[[^\]]+\]/g, "").trim();
-    if (!text && stamps.length) return;
-    if (stamps.length) {
-      stamps.forEach((stamp) => lines.push({ id: `${index}-${stamp}-${text}`, text, time: stamp }));
-      return;
-    }
-    lines.push({ id: `${index}-${trimmed}`, text: trimmed });
-  });
-  return lines.sort((a, b) => (a.time ?? Number.MAX_SAFE_INTEGER) - (b.time ?? Number.MAX_SAFE_INTEGER));
-};
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 const getActiveLyricIndex = (lines: LyricLine[], time: number, duration: number) => {
@@ -367,6 +341,17 @@ export default function App() {
     const ids = new Set(activePlaylist.trackIds);
     return tracks.filter((track) => ids.has(track.id));
   }, [activePlaylist, tracks]);
+  const upNext = useMemo(() => {
+    const order = playlistTracks.length ? playlistTracks : tracks;
+    const choices = order.filter(t => t.id !== activeTrack?.id);
+    if (shuffle) return choices[Math.floor(Math.random() * choices.length)];
+    const index = order.findIndex(t => t.id === activeTrack?.id);
+    return order[(index + 1) % order.length];
+  }, [playlistTracks, tracks, activeTrack?.id, shuffle]);
+  useEffect(() => {
+    if (view !== 'studio' && activeTrack && !audioRef.current?.src) void audioCache.preload(activeTrack.url, true);
+  }, [activeTrack?.url, view]);
+
   const waveform = useMemo(() => makeWave(activeTrack?.id || "qiaomu"), [activeTrack?.id]);
   const filteredTracks = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -512,8 +497,11 @@ export default function App() {
     if (!audio || !track) return;
     setActiveIndex(index);
     setPlayCounts((current) => ({ ...current, [track.id]: (current[track.id] || 0) + 1 }));
-    if (audio.src !== new URL(track.url, window.location.origin).href) {
-      audio.src = track.url;
+    audioCache.stop();
+    audioCache.pin('radio', track.url);
+    if (audio.dataset.trackUrl !== track.url) {
+      audio.dataset.trackUrl = track.url;
+      audio.src = audioCache.source(track.url);
       audio.load();
     }
     try {
@@ -567,9 +555,7 @@ export default function App() {
       setRadioNotice(`${activePlaylist?.name || "当前清单"}只有 1 首歌，已经在播放这一首。`);
       return;
     }
-    const current = order.findIndex((track) => track.id === activeTrack?.id);
-    const next = shuffle ? Math.floor(Math.random() * order.length) : current + 1;
-    const nextTrackId = order[(next + order.length) % order.length]?.id;
+    const nextTrackId = upNext?.id;
     const nextIndex = tracks.findIndex((track) => track.id === nextTrackId);
     if (nextIndex >= 0) void playTrack(nextIndex);
   }
@@ -601,6 +587,7 @@ export default function App() {
 
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
+    audioCache.clearPrivate();
     setAdmin(false);
     setAdminTracks([]);
   }
@@ -740,6 +727,11 @@ export default function App() {
         preload="auto"
         playsInline
         onEnded={() => (repeat ? void playTrack(activeIndex) : nextTrack())}
+        onCanPlayThrough={() => {
+          if (audioRef.current?.paused) return;
+          if (activeTrack) void audioCache.preload(activeTrack.url, true);
+          if (upNext) void audioCache.preload(upNext.url, true);
+        }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
       />
@@ -1307,7 +1299,7 @@ function QueuePanel({ tracks, activeId, query, setQuery, onPick }: {
       </Card.Header>
       <Card.Body className="queue-list grid min-h-0 gap-2 px-4 pb-5">
         {tracks.map((track) => (
-          <button key={track.id} onClick={() => onPick(track)} className={`grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-md p-2 text-left transition hover:bg-white/10 ${track.id === activeId ? "bg-primary/15" : ""}`}>
+          <button key={track.id} onPointerEnter={() => void audioCache.preload(track.url, true)} onFocus={() => void audioCache.preload(track.url, true)} onClick={() => onPick(track)} className={`grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3 rounded-md p-2 text-left transition hover:bg-white/10 ${track.id === activeId ? "bg-primary/15" : ""}`}>
             <span className="h-[52px] w-[52px] overflow-hidden rounded bg-muted">
               {track.coverUrl ? <img src={track.coverUrl} alt="" className="h-full w-full object-cover" /> : null}
             </span>
@@ -1554,7 +1546,7 @@ function DiscoverPanel({ tracks, categories, styles, playCounts, currentTrack, a
           {q ? (
             <Card.Body className="search-result-list px-4 pb-5">
               {searchResults.map((track) => (
-                <button key={track.id} type="button" className="search-result" onClick={() => onPickTrack(track)}>
+                <button key={track.id} type="button" className="search-result" onPointerEnter={() => void audioCache.preload(track.url, true)} onFocus={() => void audioCache.preload(track.url, true)} onClick={() => onPickTrack(track)}>
                   <span className="discover-cover">{track.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={18} />}</span>
                   <span className="min-w-0">
                     <strong>{track.title}</strong>
@@ -1585,7 +1577,7 @@ function DiscoverPanel({ tracks, categories, styles, playCounts, currentTrack, a
           </Card.Header>
           <Card.Body className="track-shelf px-5 pb-5">
             {styleTracks.map((track) => (
-              <button key={track.id} type="button" className="discover-track" onClick={() => onPickTrack(track)}>
+              <button key={track.id} type="button" className="discover-track" onPointerEnter={() => void audioCache.preload(track.url, true)} onFocus={() => void audioCache.preload(track.url, true)} onClick={() => onPickTrack(track)}>
                 <span className="discover-cover">{track.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={20} />}</span>
                 <span>
                   <strong>{track.title}</strong>
@@ -1616,7 +1608,7 @@ function DiscoverPanel({ tracks, categories, styles, playCounts, currentTrack, a
           </Card.Header>
           <Card.Body className="recent-play-list px-4 pb-5">
             {filteredRecentTracks.map(({ track, count }) => (
-              <button key={track.id} type="button" className="search-result recent-play-item" onClick={() => onPickTrack(track)}>
+              <button key={track.id} type="button" className="search-result recent-play-item" onPointerEnter={() => void audioCache.preload(track.url, true)} onFocus={() => void audioCache.preload(track.url, true)} onClick={() => onPickTrack(track)}>
                 <span className="discover-cover">{track.coverUrl ? <img src={track.coverUrl} alt="" /> : <Music2 size={18} />}</span>
                 <span className="min-w-0">
                   <strong>{track.title}</strong>
