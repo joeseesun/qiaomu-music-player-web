@@ -43,3 +43,8 @@ test('cold playback can stream immediately and cancelled private fetch cannot re
  f.cache.clearPrivate();release(new Response(new Uint8Array(8),{headers:{'content-type':'audio/mpeg'}}));
  assert.equal(await loading,false);assert.equal(f.cache.memory.size,0);assert.equal(f.data.size,0);
 });
+
+test('initial restoration checks disk without a competing network download',async()=>{
+ const f=await fixture();assert.equal(await f.cache.restore('/music/a.mp3'),false);assert.equal(f.requests(),0);
+ await f.cache.preload('/music/a.mp3',true);const next=f.make();assert.equal(await next.restore('/music/a.mp3'),true);assert.equal(f.requests(),1);
+});

@@ -349,7 +349,20 @@ export default function App() {
     return order[(index + 1) % order.length];
   }, [playlistTracks, tracks, activeTrack?.id, shuffle]);
   useEffect(() => {
-    if (view !== 'studio' && activeTrack && !audioRef.current?.src) void audioCache.preload(activeTrack.url, true);
+    let cancelled = false;
+    if (view !== 'studio' && activeTrack && !audioRef.current?.src) {
+      void audioCache.restore(activeTrack.url).then(() => {
+        const audio = audioRef.current;
+        if (cancelled || !audio || audio.src) return;
+        const source = audioCache.source(activeTrack.url);
+        const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+        if (source === activeTrack.url && connection?.saveData) return;
+        audio.dataset.trackUrl = activeTrack.url;
+        audio.src = source;
+        audio.load(); // Native streaming buffer is available before the first click.
+      });
+    }
+    return () => { cancelled = true; };
   }, [activeTrack?.url, view]);
 
   const waveform = useMemo(() => makeWave(activeTrack?.id || "qiaomu"), [activeTrack?.id]);
@@ -727,12 +740,21 @@ export default function App() {
         preload="auto"
         playsInline
         onEnded={() => (repeat ? void playTrack(activeIndex) : nextTrack())}
+        onProgress={() => {
+          const audio = audioRef.current;
+          if (activeTrack && audio && Number.isFinite(audio.duration) && audio.buffered.length
+            && audio.buffered.end(audio.buffered.length - 1) >= audio.duration - 0.5) {
+            void audioCache.preload(activeTrack.url, true);
+          }
+        }}
         onCanPlayThrough={() => {
           if (audioRef.current?.paused) return;
-          if (activeTrack) void audioCache.preload(activeTrack.url, true);
           if (upNext) void audioCache.preload(upNext.url, true);
         }}
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => {
+          setIsPlaying(true);
+          if (audioRef.current?.readyState === 4 && upNext) void audioCache.preload(upNext.url, true);
+        }}
         onPause={() => setIsPlaying(false)}
       />
 
