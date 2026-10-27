@@ -64,4 +64,6 @@ python3 -m py_compile scripts/studio-worker.py
 
 保持现有 Node/systemd 部署。部署 `server.js` 时必须同时部署 `lib/`；同步构建好的 `dist/`。不要覆盖 `data/`、`.env` 或删除旧音频。更新前备份运行代码和元数据，保留旧静态资源以兼容尚未刷新的页面。健康检查 `/health`，公开曲库 `/api/public`，后台工作台 `/api/studio`。
 
+反向代理必须让 `/music/` 和 `/covers/` 经过 Node 服务；不可为它们配置直接读取 `data/` 的 alias/root，也不可强制覆盖为 public 缓存。否则会绕过草稿权限。HTTP 统一跳转 HTTPS；部署后从未登录客户端请求一个真实草稿音频和封面，两者都应 401，再验证已发布音频的 Range 响应为 206。
+
 回退服务代码时停用本机执行器，恢复备份的 server/lib/dist，重启同一 systemd 服务；保留所有新增歌曲及任务文件供恢复，不回滚覆盖真实用户数据。
