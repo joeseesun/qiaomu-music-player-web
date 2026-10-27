@@ -10,6 +10,26 @@ test('aligned lyrics keep untimed continuation in place and remove split directi
  assert.deepEqual(parseLyrics('第一行\n第二行').map(l=>l.text),['第一行','第二行']);
  assert.deepEqual(parseLyrics('[00:01.20][00:02.3]咚').map(l=>l.time),[1.2,2.3]);
 });
+test('Suno word alignment restores original English lines and first-word timing',async()=>{
+ const {parseLyrics}=await import('../public/lyrics.mjs');
+ const raw="[00:40.69] You\n[00:40.96] hum\n[00:41.33] a\n[00:41.51] tune\n[00:41.97] like\n[00:42.37] a\n[00:42.54] secret\n[00:43.34] sign\n\n[00:44.52] I\n[00:44.82] check\n[00:45.16] the\n[00:45.41] clock,\n[00:47.02] it's\n[00:47.57] half\n[00:48.85] past\n[00:49.65] nine\n\n(\n[01:26.88] One\n[01:26.96] more\n[01:27.07] time)";
+ assert.deepEqual(parseLyrics(raw).map(({text,time})=>({text,time})),[
+  {text:'You hum a tune like a secret sign',time:40.69},
+  {text:"I check the clock, it's half past nine",time:44.52},
+  {text:'(One more time)',time:86.88}]);
+});
+test('Suno Chinese fragments join without extra spaces and preserve repeated lines',async()=>{
+ const {parseLyrics}=await import('../public/lyrics.mjs');
+ const raw='[00:15.80] [Intro:\n[00:15.84] Rain\n[00:15.94] drums]\n\n[00:20.96] 锅盖一敲\n[00:22.66] 整条街醒过来\n\n[00:36.86] 咚\n[00:37.34] 咚\n[00:37.74] 咚\n[00:38.14] 敲成鼓点\n\n[00:40.00] 咚\n[00:40.34] 咚\n[00:40.74] 咚\n[00:41.14] 敲成鼓点';
+ assert.deepEqual(parseLyrics(raw).map(({text,time})=>({text,time})),[
+  {text:'锅盖一敲整条街醒过来',time:20.96},{text:'咚咚咚敲成鼓点',time:36.86},{text:'咚咚咚敲成鼓点',time:40}]);
+});
+test('ordinary line LRC and untimed verses keep their existing line breaks',async()=>{
+ const {parseLyrics}=await import('../public/lyrics.mjs');
+ assert.deepEqual(parseLyrics('[00:01]First complete line\n[00:02]Second complete line\n\n[00:03][00:04]Repeat this line').map(l=>[l.text,l.time]),[
+  ['First complete line',1],['Second complete line',2],['Repeat this line',3],['Repeat this line',4]]);
+ assert.deepEqual(parseLyrics('One\nword\nhere\n\nAnother verse').map(l=>l.text),['One','word','here','Another verse']);
+});
 async function fixture(options={}) {
  const {AudioCache}=await import('../public/audio-cache.mjs');
  const data=new Map();let requests=0,serial=0;const revoked=[];
