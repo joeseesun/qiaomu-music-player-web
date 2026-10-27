@@ -26,13 +26,14 @@ export class AudioCache {
     this.queue = this.queue.filter(item => { if (!item.public) item.resolve(false); return item.public; });
     for (const [key, item] of this.memory) if (!item.public) { this.urls.revokeObjectURL(item.src); this.memory.delete(key); }
   }
-  preload(url, isPublic = false) {
+  restore(url) { return this.preload(url, true, true); }
+  preload(url, isPublic = false, cacheOnly = false) {
     const key = this.key(url);
     if (!key || this.memory.has(key)) return Promise.resolve(Boolean(key));
     if (this.active?.key === key) return this.active.promise;
     const existing = this.queue.find(item => item.key === key); if (existing) return existing.promise;
     let resolve; const promise = new Promise(r => { resolve = r; });
-    const item = { key, public: isPublic, promise, resolve, controller: new AbortController(), epoch: this.epoch };
+    const item = { key, public: isPublic, promise, resolve, controller: new AbortController(), epoch: this.epoch, cacheOnly };
     // A moving pointer must not enqueue the entire library.
     while (this.queue.length >= 2) this.queue.shift().resolve(false);
     this.queue.push(item); void this.drain(); return promise;
@@ -50,6 +51,7 @@ export class AudioCache {
     let response = await disk?.match(item.key);
     const hit = Boolean(response);
     if (!response) {
+      if (item.cacheOnly) return false;
       if (globalThis.navigator?.connection?.saveData) return false;
       response = await this.fetcher(item.key, { credentials: item.public ? 'omit' : 'same-origin', signal: item.controller.signal, priority: 'low' });
     }

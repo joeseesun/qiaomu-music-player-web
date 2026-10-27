@@ -10,7 +10,7 @@
     return `${minutes}:${seconds}`;
   };
 
-  const { parseLyrics } = await import(`${defaultBase}/lyrics.mjs?v=1`);
+  const { parseLyrics } = await import(`${defaultBase}/lyrics.mjs?v=2`);
 
   const getActiveLine = (lines, time, duration) => {
     if (!lines.length) return 0;
