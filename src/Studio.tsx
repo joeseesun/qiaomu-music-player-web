@@ -39,6 +39,8 @@ type Job = {
   error?: string;
   publicPath?: string;
   generationStarted?: boolean;
+  browserPending?: boolean;
+  stage?: string;
   plan?: {
     title: string;
     lyrics: string;
@@ -360,7 +362,7 @@ export default function Studio({
                     {job.status === "running" && (
                       <Loader2 size={14} className="studio-spin" />
                     )}
-                    {statuses[job.status] || job.status}
+                    {job.status === 'running' ? job.stage || statuses.running : job.status === 'blocked' && job.browserPending ? '等待 Suno 网页操作' : statuses[job.status] || job.status}
                   </span>
                 </header>
                 {job.brief && <p>{job.brief}</p>}
@@ -435,6 +437,15 @@ export default function Studio({
                   <a href={job.publicPath}>
                     打开已发布歌曲 <ArrowUpRight size={15} />
                   </a>
+                )}
+                {job.status === 'blocked' && job.browserPending && (
+                  <div className="studio-browser-resume">
+                    <p>请在本机 Ego Lite 的 Suno 页面完成验证或查看生成结果。点击下方按钮表示交回浏览器控制，只检查已有结果，不再点击创建。</p>
+                    <button className="studio-primary" disabled={!!busy} onClick={() => void run(`browser:${job.id}`, async () => {
+                      await request(`/api/studio/jobs/${job.id}/browser-check`, 'POST', {});
+                      setNotice('已请求检查 Suno 生成结果，不会再次创建');
+                    })}>已完成操作，检查生成结果</button>
+                  </div>
                 )}
                 {job.status === "blocked" &&
                   job.plan &&

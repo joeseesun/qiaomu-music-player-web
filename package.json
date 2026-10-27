@@ -4,12 +4,12 @@
   "private": false,
   "description": "Self-hosted web radio and admin shelf for AI-generated music.",
   "scripts": {
-    "test": "node --test scripts/studio.test.js && python3 scripts/studio-worker.test.py",
+    "test": "node --test scripts/studio.test.js scripts/studio-browser.test.js && python3 scripts/studio-worker.test.py",
     "dev": "vite --host 127.0.0.1",
     "dev:server": "node server.js",
     "start": "node server.js",
     "build": "vite build && node scripts/check.js",
-    "check": "tsc --noEmit && node --check server.js",
+    "check": "tsc --noEmit && node --check server.js && node --input-type=module --check < scripts/studio-browser.js",
     "capture:screenshots": "node scripts/capture-screenshots.js"
   },
   "engines": {

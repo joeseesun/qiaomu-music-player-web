@@ -16,13 +16,13 @@
 
 - Node 服务：`lib/suno-feed.js` 读取公开页面的 Flight 数据，`lib/studio.js` 维护同步和任务。数据保存在 `DATA_DIR/studio.json`，原子替换、串行写入；不会提交 Git。
 - 服务内调度：每分钟检查是否跨过北京时间 09:00；失败 30 分钟后再试；重启补跑漏掉的一次。无需电脑在线，也不依赖 Codex 聊天。
-- 本机执行器：`scripts/studio-worker.py` 每 20 秒领取任务，每次最多一个。电脑睡眠或离线时任务留在服务器。Suno 账号通过 CLI 使用现有登录；无人值守路径不启动浏览器或自动解验证码，遇到这些要求停止并显示阻碍。
+- 本机执行器：`scripts/studio-worker.py` 每 20 秒领取任务，每次最多一个。电脑睡眠或离线时任务留在服务器。Suno 账号通过 CLI 使用现有登录；HTTP 预检确认需要真人验证时，自动切到本机 Ego Lite，填写现有方案并仅点击一次 Create；不会自动解验证码。需要人工时交回浏览器控制，用户完成后在工作台点「检查生成结果」继续，不会再次点击 Create。等待人工期间暂停后续新任务，避免抢占浏览器。
 - 文本模型：通过 `qiaomu-llm` 注册表调用 `magpie-openai` 的 `deepseek/deepseek-flash`，不会改用 Pro；可读取音频时使用注册的 Gemini 音频输入。凭据从钥匙串读取。
 - 封面：优先使用任务目录中经过目视检查的 `cover-approved.png`（交互时可用 Codex 内置生图）。无人值守时使用新生成歌曲自己的 Suno 封面，不调用旧的第三方生图服务。上传接口强制草稿，包含音频、同步 LRC 和封面，用户试听时可检查。
 
 ## 安装本机执行器
 
-前置：Python 3、ffmpeg/ffprobe、Suno CLI 0.10.1+，已登录 Suno；个人 skill 源目录含 qiaomu-llm、qiaomu-suno-master、qiaomu-music-publisher。
+前置：Python 3、ffmpeg/ffprobe、Suno CLI 0.10.1+、Ego Lite（ego-browser CLI），已登录 Suno；个人 skill 源目录含 qiaomu-llm、qiaomu-suno-master、qiaomu-music-publisher。
 
 服务端设置至少 32 字符的 `STUDIO_WORKER_TOKEN`。本机将同一值存入钥匙串，service 为 `qiaomu-music-studio`、account 为 `worker`，避免放进命令历史或 Git。本机配置 `~/.config/qiaomu-music-studio/worker.json` 只含：
 
@@ -35,13 +35,15 @@ python3 scripts/studio-worker.py --once
 python3 scripts/studio-worker.py
 ```
 
+安装时将 `studio-worker.py` 和 `studio-browser.js` 放在同一目录；LaunchAgent 的 PATH 必须包含 `~/.local/bin`（ego-browser）与 `~/.cargo/bin`（suno）。浏览器阶段保存 `browser-state.json`（窗口、提交前歌曲 ID、一次提交意图），崩溃后只检查结果，不重复点击 Create。
+
 安装状态以 `~/Library/LaunchAgents/ai.qiaomu.music-studio-worker.plist` 与网页「我的创作」中的最近心跳为准。配置或依赖存在不代表已成功生成。
 
 ## 恢复与扣费边界
 
 - 相同参考曲与要求在存在未完成任务时去重，最多 10 个待处理任务。
 - Suno 使用任务 UUID 作为稳定 `request-id`；提交前保存本地 intent，成功后先保存歌曲 ID，再做下载、歌词、封面和上传。
-- 提交结果不确定时不会自动重新生成。先检查 `suno jobs` 和 `~/Documents/Suno/Studio/<job-id>` 找回歌曲。
+- CLI 的 JSON 错误从 stderr 读取；只有明确的 `captcha_required`（提交前预检失败）才允许切换网页。未知错误或提交结果不确定时不会自动重新生成。先检查 `suno jobs` 和 `~/Documents/Suno/Studio/<job-id>` 找回歌曲。
 - 已有歌曲 ID 的失败任务可点「恢复已有歌曲的处理」，复用歌曲，不再次生成。提交前失败可直接重试。
 - 网页验证后手动生成的结果，可在暂停任务里粘贴 1–2 个 `https://suno.com/song/...` 链接，点「关联并继续处理」。歌词与风格方案保留在任务详情中；关联只恢复下载、歌词、封面和候选上传。
 - 候选音频和封面在发布前要求后台登录，响应不缓存；发布后才允许公开播放。

@@ -2,7 +2,8 @@
 """Local Suno worker. Secrets stay in Keychain, music assets stay outside the repo.
 
 One generation request per job, stable Suno request ID, no automatic resubmission
-after uncertain failures. No browser launch or CAPTCHA solver in background jobs.
+after uncertain failures. Visible browser continuation only after a known
+pre-submission CAPTCHA check; challenges are handed to the user, never solved.
 """
 import argparse
 import base64
@@ -26,7 +27,20 @@ CONFIG = Path.home() / '.config/qiaomu-music-studio/worker.json'
 OUTPUT = Path.home() / 'Documents/Suno/Studio'
 
 class Blocked(RuntimeError):
-    pass
+    def __init__(self, message, code=''):
+        super().__init__(message)
+        self.code = code
+
+def command_error_code(result):
+    # Suno writes structured failures to stderr, while successes use stdout.
+    for raw in (result.stderr, result.stdout):
+        for line in reversed(raw.splitlines()):
+            try:
+                code = json.loads(line).get('error', {}).get('code', '')
+                if re.fullmatch('[a-z_]{1,60}', code): return code
+            except (ValueError, AttributeError, TypeError):
+                continue
+    return ''
 
 def module(name, file):
     spec = importlib.util.spec_from_file_location(name, file)
@@ -38,14 +52,11 @@ def command(args, timeout=90):
     result = subprocess.run([str(x) for x in args], capture_output=True, timeout=timeout, text=True)
     if result.returncode:
         # Never send provider output, credentials, or process arguments back to the site.
-        try:
-            code = json.loads(result.stdout).get('error', {}).get('code', '')
-        except (ValueError, AttributeError):
-            code = ''
+        code = command_error_code(result)
         known = {'auth_missing': 'Suno 尚未登录', 'auth_expired': 'Suno 登录已过期，请在网页重新登录', 'captcha_required': 'Suno 需要在网页完成人机验证', 'not_found': 'Suno 无法找到或无权访问这首歌曲', 'rate_limited': 'Suno 暂时限流'}
         message = known.get(code, f'{Path(str(args[0])).name} 执行未完成（退出码 {result.returncode}）')
         if re.fullmatch('[a-z_]{1,60}', code): message += f' [{code}]'
-        raise Blocked(message + '；已有产物已保留，未自动重复生成')
+        raise Blocked(message + '；已有产物已保留，未自动重复生成', code)
     return result.stdout
 
 def save(file, data):
@@ -167,6 +178,21 @@ class Worker:
         with urllib.request.urlopen(request, timeout=60) as response: return json.load(response)
     def progress(self, job, **fields):
         return self.api('jobs/' + job['id'], {'lease': job['lease'], **fields}, 'PATCH')
+    def browser_submit(self, job, folder, check=False):
+        if not shutil.which('ego-browser'):
+            raise Blocked('需要本机 Ego Lite 才能接续 Suno 网页验证', 'browser_unavailable')
+        self.progress(job, browserPending=True, stage='正在检查 Suno 结果' if check else '正在打开 Suno 并填写创作方案')
+        script = Path(__file__).with_name('studio-browser.js').read_text()
+        script = 'const studioInput = ' + json.dumps({'folder': str(folder), 'jobId': job['id'], 'check': check}) + ';\n' + script
+        result = subprocess.run(['ego-browser', 'nodejs'], input=script, capture_output=True, text=True, timeout=150)
+        for line in reversed(result.stdout.splitlines()):
+            if line.startswith('QM_BROWSER_RESULT='):
+                value = json.loads(line.split('=', 1)[1])
+                if value.get('ids'):
+                    self.progress(job, browserPending=False, stage='正在下载歌曲与同步歌词')
+                    return value['ids']
+                raise Blocked(value.get('message', '请查看 Suno 创作页面'), 'browser_action_required')
+        raise Blocked('浏览器操作已停止，请在 Ego Lite 查看当前页面；完成后点「检查生成结果」，不会重复提交', 'browser_action_required')
     def readiness(self):
         if not shutil.which('ffmpeg'): return False, '需要安装 ffmpeg 才能分析参考音频'
         try:
@@ -199,16 +225,29 @@ class Worker:
                     self.progress(job)
         thread = threading.Thread(target=heartbeat, daemon=True); thread.start()
         try:
+            self.progress(job, stage='正在准备歌词和风格方案')
             plan = prepare(job, folder); self.progress(job, plan=plan)
             ids_file = folder / 'song-ids.json'
             ids = job.get('songIds') or (json.loads(ids_file.read_text()) if ids_file.exists() else [])
             if not ids:
                 intent = folder / 'generation-intent.json'
-                if intent.exists(): raise Blocked('检测到之前的提交意图，请检查 suno jobs 找回歌曲；未重复提交')
-                self.progress(job, generationStarted=True)
-                save(intent, {'request_id': job['id'], 'model': 'v6'})
-                result = json.loads(command([self.suno, '--no-browser', 'generate', '--title', plan['title'], '--tags', plan['style'], '--lyrics-file', folder / 'lyrics.txt', '--exclude', str(plan.get('exclude', ''))[:950], '--model', 'v6', '--request-id', job['id']], timeout=180))
-                save(folder / 'generation-result.json', result)
+                if job.get('browserAction') == 'check':
+                    ids = self.browser_submit(job, folder, check=True)
+                elif intent.exists():
+                    if json.loads(intent.read_text()).get('preflight') != 'captcha_required':
+                        raise Blocked('检测到之前的提交意图，请检查 suno jobs 找回歌曲；未重复提交')
+                    ids = self.browser_submit(job, folder)
+                else:
+                    self.progress(job, generationStarted=True, stage='正在提交 Suno')
+                    save(intent, {'request_id': job['id'], 'model': 'v6'})
+                    try:
+                        result = json.loads(command([self.suno, '--no-browser', 'generate', '--title', plan['title'], '--tags', plan['style'], '--lyrics-file', folder / 'lyrics.txt', '--exclude', str(plan.get('exclude', ''))[:950], '--model', 'v6', '--request-id', job['id']], timeout=180))
+                        save(folder / 'generation-result.json', result)
+                    except Blocked as error:
+                        if error.code != 'captcha_required': raise
+                        # CLI source confirms this error occurs BEFORE generation submission.
+                        save(intent, {'request_id': job['id'], 'model': 'v6', 'preflight': 'captcha_required'})
+                        ids = self.browser_submit(job, folder)
                 def clip_ids(value):
                     found = []
                     if isinstance(value, dict):
@@ -217,10 +256,10 @@ class Worker:
                     elif isinstance(value, list):
                         for child in value: found.extend(clip_ids(child))
                     return list(dict.fromkeys(found))
-                ids = clip_ids(result)
+                if not ids: ids = clip_ids(result)
                 if not ids or len(ids) > 2: raise Blocked('Suno 没有返回可确认的候选 ID，请检查 suno jobs；未自动重试')
                 save(ids_file, ids)
-            self.progress(job, songIds=ids)
+            self.progress(job, songIds=ids, browserPending=False, stage='正在等待并下载候选歌曲')
             status = json.loads(command([self.suno, '--no-browser', 'status', *ids, '--wait'], timeout=600))
             clips = status.get('data', [])
             if not isinstance(clips, list): raise Blocked('无法确认 Suno 歌曲状态，已有 ID 已保留')
@@ -243,7 +282,7 @@ class Worker:
             self.progress(job, status='review')
         except Exception as error:
             message = str(error) if isinstance(error, Blocked) else f'创作在 {type(error).__name__} 处停止，已有产物已保留；请检查本机执行器'
-            with contextlib.suppress(Exception): self.progress(job, status='blocked', error=message)
+            with contextlib.suppress(Exception): self.progress(job, status='blocked', error=message, errorCode=getattr(error, 'code', ''))
             print(message, flush=True)
         finally:
             stop.set(); thread.join(timeout=1)
