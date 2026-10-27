@@ -1,3 +1,4 @@
+import { audioCache } from '../public/audio-cache.mjs';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -147,6 +148,13 @@ export default function Studio({
     const timer = setInterval(refresh, 15000);
     return () => clearInterval(timer);
   }, [admin]);
+  useEffect(() => {
+    if (admin && tab === 'jobs' && !isPlaying) {
+      const candidates = data?.jobs.flatMap(j => j.candidates).slice(0, 2) || [];
+      candidates.forEach(c => void audioCache.preload(c.audioUrl));
+    }
+  }, [admin, tab, data?.jobs, isPlaying]);
+  useEffect(() => () => { audioCache.pin('studio', ''); audioCache.clearPrivate(); }, []);
   const run = async (key: string, action: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -205,12 +213,14 @@ export default function Studio({
       } else audio.current.pause();
       return;
     }
+    audioCache.stop();
+    audioCache.pin('studio', item.url);
     onPlay();
     setPlaying(item);
     setTime(0);
     setLength(0);
     if (audio.current) {
-      audio.current.src = item.url;
+      audio.current.src = audioCache.source(item.url);
       try {
         await audio.current.play();
       } catch {
@@ -397,6 +407,8 @@ export default function Studio({
                             cover: c.coverUrl,
                           })
                         }
+                        onPointerEnter={() => void audioCache.preload(c.audioUrl)}
+                        onFocus={() => void audioCache.preload(c.audioUrl)}
                         aria-label={`试听候选 ${String.fromCharCode(65 + i)}`}
                       >
                         {playing?.id === c.trackId && isPlaying ? (
