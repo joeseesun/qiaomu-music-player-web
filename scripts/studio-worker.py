@@ -59,6 +59,29 @@ def safe_media(url):
     p = urllib.parse.urlsplit(url)
     return p.scheme == 'https' and not p.username and not p.password and bool(re.fullmatch(r'(cdn\d?\.suno\.(ai|com)|[a-z0-9-]+\.cloudfront\.net)', p.hostname or ''))
 
+def candidate_cover(clip, folder):
+    """Use an inspected local cover, or the generated song's own source artwork.
+
+    Codex image generation is interactive; the unattended worker must not call
+    obsolete third-party image endpoints or stall an otherwise complete song.
+    """
+    approved = folder / 'cover-approved.png'
+    if approved.exists(): return approved
+    for name in ('suno-cover.jpg', 'suno-cover.png'):
+        cached = folder / name
+        if cached.exists(): return cached
+    url = clip.get('image_large_url') or clip.get('image_url') or ''
+    if not safe_media(url): raise Blocked('新歌尚无可用封面，请稍后恢复；不会重新生成歌曲')
+    with urllib.request.urlopen(url, timeout=45) as response:
+        if not safe_media(response.url): raise Blocked('封面跳转到未知来源')
+        content = response.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024: raise Blocked('封面文件过大')
+    if not (content.startswith(b'\xff\xd8\xff') or content.startswith(b'\x89PNG\r\n\x1a\n')):
+        raise Blocked('封面不是可识别的 JPEG 或 PNG 图片')
+    cached = folder / ('suno-cover.png' if content.startswith(b'\x89PNG') else 'suno-cover.jpg')
+    cached.write_bytes(content)
+    return cached
+
 def audio_sample(reference, folder):
     """Read the page-provided stream; never guess a legacy CDN download URL."""
     url = reference.get('audioUrl', '')
@@ -198,7 +221,10 @@ class Worker:
                 if not ids or len(ids) > 2: raise Blocked('Suno 没有返回可确认的候选 ID，请检查 suno jobs；未自动重试')
                 save(ids_file, ids)
             self.progress(job, songIds=ids)
-            command([self.suno, '--no-browser', 'status', *ids, '--wait'], timeout=600)
+            status = json.loads(command([self.suno, '--no-browser', 'status', *ids, '--wait'], timeout=600))
+            clips = status.get('data', [])
+            if not isinstance(clips, list): raise Blocked('无法确认 Suno 歌曲状态，已有 ID 已保留')
+            clips = {clip['id']: clip for clip in clips if isinstance(clip, dict) and 'id' in clip}
             for i, clip_id in enumerate(ids):
                 candidate_dir = folder / clip_id; candidate_dir.mkdir(exist_ok=True)
                 audios = [p for p in candidate_dir.iterdir() if p.suffix in ('.mp3', '.m4a', '.wav')]
@@ -212,9 +238,7 @@ class Worker:
                 lrc = candidate_dir / (clip_id + '.lrc')
                 if not lrc.exists(): lrc.write_text(command([self.suno, '--no-browser', 'timed-lyrics', clip_id, '--lrc'], timeout=90))
                 self.publisher.validate_lrc(lrc)
-                # Reuse the existing publisher's cover workflow; uploads are drafts.
-                cover = self.publisher.generate_qiaomu_cover(title=plan['title'], clip_id=clip_id, lrc=lrc, output_dir=candidate_dir, provider='z-image', timeout=240)
-                if not cover: raise Blocked('封面未生成，歌曲与同步歌词已保存，恢复任务不会重新生成歌曲')
+                cover = candidate_cover(clips.get(clip_id, {}), candidate_dir)
                 self.upload(job, clip_id, plan['title'] + f' · {chr(65+i)}', audio, lrc, cover)
             self.progress(job, status='review')
         except Exception as error:

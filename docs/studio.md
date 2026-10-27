@@ -18,11 +18,11 @@
 - 服务内调度：每分钟检查是否跨过北京时间 09:00；失败 30 分钟后再试；重启补跑漏掉的一次。无需电脑在线，也不依赖 Codex 聊天。
 - 本机执行器：`scripts/studio-worker.py` 每 20 秒领取任务，每次最多一个。电脑睡眠或离线时任务留在服务器。Suno 账号通过 CLI 使用现有登录；无人值守路径不启动浏览器或自动解验证码，遇到这些要求停止并显示阻碍。
 - 文本模型：通过 `qiaomu-llm` 注册表调用 `magpie-openai` 的 `deepseek/deepseek-flash`，不会改用 Pro；可读取音频时使用注册的 Gemini 音频输入。凭据从钥匙串读取。
-- 封面：复用 `qiaomu-music-publisher` 的封面生成；上传接口强制草稿，包含音频、同步 LRC 和封面。用户试听页同时检查封面。
+- 封面：优先使用任务目录中经过目视检查的 `cover-approved.png`（交互时可用 Codex 内置生图）。无人值守时使用新生成歌曲自己的 Suno 封面，不调用旧的第三方生图服务。上传接口强制草稿，包含音频、同步 LRC 和封面，用户试听时可检查。
 
 ## 安装本机执行器
 
-前置：Python 3、ffmpeg/ffprobe、Suno CLI 0.10.1+，已登录 Suno；个人 skill 源目录含 qiaomu-llm、qiaomu-suno-master、qiaomu-music-publisher、qiaomu-image-generator。
+前置：Python 3、ffmpeg/ffprobe、Suno CLI 0.10.1+，已登录 Suno；个人 skill 源目录含 qiaomu-llm、qiaomu-suno-master、qiaomu-music-publisher。
 
 服务端设置至少 32 字符的 `STUDIO_WORKER_TOKEN`。本机将同一值存入钥匙串，service 为 `qiaomu-music-studio`、account 为 `worker`，避免放进命令历史或 Git。本机配置 `~/.config/qiaomu-music-studio/worker.json` 只含：
 
@@ -63,5 +63,7 @@ python3 -m py_compile scripts/studio-worker.py
 ## 部署与回退
 
 保持现有 Node/systemd 部署。部署 `server.js` 时必须同时部署 `lib/`；同步构建好的 `dist/`。不要覆盖 `data/`、`.env` 或删除旧音频。更新前备份运行代码和元数据，保留旧静态资源以兼容尚未刷新的页面。健康检查 `/health`，公开曲库 `/api/public`，后台工作台 `/api/studio`。
+
+反向代理必须让 `/music/` 和 `/covers/` 经过 Node 服务；不可为它们配置直接读取 `data/` 的 alias/root，也不可强制覆盖为 public 缓存。否则会绕过草稿权限。站点显式设置 `proxy_cache off`，并转发 `Range` / `If-Range`，避免继承全局代理缓存而吞掉分段请求。HTTP 统一跳转 HTTPS；部署后从未登录客户端请求一个真实草稿音频和封面，两者都应 401，再验证已发布音频的 Range 响应为 206。
 
 回退服务代码时停用本机执行器，恢复备份的 server/lib/dist，重启同一 systemd 服务；保留所有新增歌曲及任务文件供恢复，不回滚覆盖真实用户数据。

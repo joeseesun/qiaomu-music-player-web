@@ -4,7 +4,7 @@
   "private": false,
   "description": "Self-hosted web radio and admin shelf for AI-generated music.",
   "scripts": {
-    "test": "node --test scripts/studio.test.js",
+    "test": "node --test scripts/studio.test.js && python3 scripts/studio-worker.test.py",
     "dev": "vite --host 127.0.0.1",
     "dev:server": "node server.js",
     "start": "node server.js",
