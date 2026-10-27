@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { Studio, fail } = require('./lib/studio');
 
 const PORT = Number(process.env.PORT || 3068);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -16,6 +17,18 @@ const SESSION_SECRET = process.env.SESSION_SECRET || (ADMIN_PASSWORD
   ? crypto.createHash("sha256").update(ADMIN_PASSWORD).digest("hex")
   : crypto.randomBytes(32).toString("hex"));
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 120 * 1024 * 1024);
+const studio = new Studio(DATA_DIR);
+const WORKER_TOKEN = process.env.STUDIO_WORKER_TOKEN || '';
+function isStudioWorker(req) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
+  return WORKER_TOKEN.length >= 32 && Buffer.byteLength(token) === Buffer.byteLength(WORKER_TOKEN) && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(WORKER_TOKEN));
+}
+let trackWrites = Promise.resolve();
+function withTrackWrite(fn) {
+  const pending = trackWrites.then(fn);
+  trackWrites = pending.catch(() => {});
+  return pending;
+}
 
 const audioTypes = new Map([
   ["audio/mpeg", ".mp3"],
@@ -206,7 +219,8 @@ function normalizeTrack(track) {
 }
 
 async function writeTracks(tracks) {
-  await fsp.writeFile(DB_FILE, `${JSON.stringify(tracks.map(normalizeTrack), null, 2)}\n`);
+  await fsp.writeFile(`${DB_FILE}.tmp`, `${JSON.stringify(tracks.map(normalizeTrack), null, 2)}\n`);
+  await fsp.rename(`${DB_FILE}.tmp`, DB_FILE);
 }
 
 async function listTracks({ admin = false } = {}) {
@@ -288,7 +302,7 @@ function isAdmin(req) {
   const age = Date.now() - Number(parts[0]);
   if (!Number.isFinite(age) || age < 0 || age > 7 * 24 * 60 * 60 * 1000) return false;
   const expected = sign(payload);
-  if (parts[2].length !== expected.length) return false;
+  if (!/^[a-f0-9]{64}$/.test(parts[2])) return false;
   return crypto.timingSafeEqual(Buffer.from(parts[2]), Buffer.from(expected));
 }
 
@@ -369,7 +383,10 @@ async function saveUploadFile(part, dir, basename, allowedTypes) {
   return file;
 }
 
-async function createTrackFromMultipart(req, res) {
+async function createTrackFromMultipart(req, res, candidate = null) {
+  return withTrackWrite(() => createTrackFromMultipartImpl(req, res, candidate));
+}
+async function createTrackFromMultipartImpl(req, res, candidate = null) {
   const body = await readBody(req);
   const { fields, files } = fieldsFromParts(parseMultipart(body, req.headers["content-type"]));
   const audio = files.audio;
@@ -382,7 +399,12 @@ async function createTrackFromMultipart(req, res) {
   const artist = cleanText(fields.artist, "Qiaomu");
   const source = cleanText(fields.source, "Suno");
   const album = cleanText(fields.album, "Qiaomu Radio");
-  const id = crypto.randomUUID();
+  const id = candidate?.id || crypto.randomUUID();
+  if (candidate) {
+    const existing = (await readTracks()).find(t => t.id === id);
+    if (existing) return existing;
+    if (!files.cover || !/\[\d{1,2}:\d{2}(?:\.\d+)?\]/.test(fields.lyrics || '')) throw fail(400, '候选必须包含封面与同步歌词');
+  }
   const basename = `${slugify(title)}-${id.slice(0, 8)}`;
   const audioFile = await saveUploadFile(audio, MUSIC_DIR, basename, audioTypes);
   const coverFile = await saveUploadFile(files.cover, COVER_DIR, basename, imageTypes);
@@ -397,17 +419,21 @@ async function createTrackFromMultipart(req, res) {
     size: audio.body.length,
     contentType: audio.type,
     lyrics: fields.lyrics || "",
-    published: fields.published !== "false",
+    published: candidate ? false : fields.published !== "false",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
   const tracks = await readTracks();
   tracks.push(track);
   await writeTracks(tracks);
-  send(res, 201, track);
+  if (!candidate) send(res, 201, track);
+  return track;
 }
 
 async function updateTrack(req, res, id) {
+  return withTrackWrite(() => updateTrackImpl(req, res, id));
+}
+async function updateTrackImpl(req, res, id) {
   const body = await readJson(req);
   const tracks = await readTracks();
   const index = tracks.findIndex((track) => track.id === id);
@@ -430,6 +456,9 @@ async function updateTrack(req, res, id) {
 }
 
 async function deleteTrack(res, id) {
+  return withTrackWrite(() => deleteTrackImpl(res, id));
+}
+async function deleteTrackImpl(res, id) {
   const tracks = await readTracks();
   const track = tracks.find((item) => item.id === id);
   if (!track) {
@@ -443,6 +472,9 @@ async function deleteTrack(res, id) {
 }
 
 async function handleLegacyUpload(req, res, url) {
+  return withTrackWrite(() => handleLegacyUploadImpl(req, res, url));
+}
+async function handleLegacyUploadImpl(req, res, url) {
   const type = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
   const ext = audioTypes.get(type);
   if (!ext) {
@@ -534,6 +566,68 @@ async function serveEmbedPlayer(req, res) {
 
 async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  if (url.pathname.startsWith('/api/studio')) {
+    const worker = url.pathname.startsWith('/api/studio/worker/');
+    if (worker ? !isStudioWorker(req) : !isAdmin(req)) {
+      send(res, 401, { error: '请先登录乔木音乐后台' }); return;
+    }
+    // JSON-only mutations and same-origin browser requests protect the cookie session.
+    if (!['GET', 'HEAD'].includes(req.method) && !worker) {
+      if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) throw fail(403, '请求来源不匹配');
+      if (!String(req.headers['content-type']).startsWith('application/json')) throw fail(415, '需要 JSON 请求');
+    }
+    if (url.pathname === '/api/studio' && req.method === 'GET') { send(res, 200, studio.snapshot(true)); return; }
+    if (url.pathname === '/api/studio/sync' && req.method === 'POST') { send(res, 200, await studio.sync()); return; }
+    if (url.pathname === '/api/studio/jobs' && req.method === 'POST') {
+      const { lease, ...job } = await studio.createJob(await readJson(req)); send(res, 201, job); return;
+    }
+    const preference = /^\/api\/studio\/preferences\/([a-f0-9-]{36})$/.exec(url.pathname);
+    if (preference && req.method === 'PATCH') { send(res, 200, await studio.preference(preference[1], await readJson(req))); return; }
+    const cancel = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/cancel$/.exec(url.pathname);
+    if (cancel && req.method === 'POST') { send(res, 200, await studio.cancel(cancel[1])); return; }
+    const resume = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/resume$/.exec(url.pathname);
+    if (resume && req.method === 'POST') { send(res, 200, await studio.resume(resume[1])); return; }
+    const attach = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/attach$/.exec(url.pathname);
+    if (attach && req.method === 'POST') { send(res, 200, await studio.attach(attach[1], (await readJson(req)).links)); return; }
+    const publish = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/publish$/.exec(url.pathname);
+    if (publish && req.method === 'POST') {
+      const body = await readJson(req);
+      const result = await studio.mutate(s => withTrackWrite(async () => {
+        const job = s.jobs.find(j => j.id === publish[1]);
+        if (!job || !['review', 'published'].includes(job.status)) throw fail(409, '候选尚未准备好');
+        const candidate = job.candidates.find(c => c.trackId === body.trackId);
+        if (!candidate) throw fail(400, '请选择本次创作的候选');
+        if (job.status === 'published' && job.publishedTrackId !== body.trackId) throw fail(409, '本次创作已经发布了另一个版本');
+        const tracks = await readTracks(); const track = tracks.find(t => t.id === candidate.trackId);
+        if (!track) throw fail(404, '候选音频不存在');
+        await fsp.access(path.join(MUSIC_DIR, track.file));
+        if (!track.coverFile || !parseLyrics(track.lyrics).some(l => l.time !== undefined)) throw fail(409, '封面或同步歌词不完整');
+        await fsp.access(path.join(COVER_DIR, track.coverFile));
+        track.published = true; track.updatedAt = new Date().toISOString(); await writeTracks(tracks);
+        job.status = 'published'; job.publishedTrackId = track.id; job.publicPath = trackPath(track);
+        return { trackId: track.id, publicPath: job.publicPath };
+      })); send(res, 200, result); return;
+    }
+    if (url.pathname === '/api/studio/worker/claim' && req.method === 'POST') { send(res, 200, { job: await studio.claim(await readJson(req)) }); return; }
+    const progress = /^\/api\/studio\/worker\/jobs\/([a-f0-9-]{36})$/.exec(url.pathname);
+    if (progress && req.method === 'PATCH') { send(res, 200, await studio.progress(progress[1], await readJson(req))); return; }
+    const asset = /^\/api\/studio\/worker\/jobs\/([a-f0-9-]{36})\/candidates$/.exec(url.pathname);
+    if (asset && req.method === 'POST') {
+      const lease = req.headers['x-studio-lease']; const clipId = url.searchParams.get('clipId');
+      if (!/^[a-f0-9-]{36}$/i.test(clipId || '')) throw fail(400, '歌曲 ID 无效');
+      // Serialize each upload with job state, and use deterministic IDs for safe retries.
+      const result = await studio.mutate(async s => {
+        const job = s.jobs.find(j => j.id === asset[1]);
+        if (!job || job.status !== 'running' || job.lease !== lease || !job.songIds?.includes(clipId)) throw fail(409, '任务执行权或歌曲来源无效');
+        const id = crypto.createHash('sha256').update(`${job.id}:${clipId}`).digest('hex').slice(0, 32);
+        const track = await createTrackFromMultipart(req, res, { id });
+        if (!job.candidates.some(c => c.trackId === track.id)) job.candidates.push({ trackId: track.id, clipId, title: track.title, audioUrl: track.url, coverUrl: track.coverUrl });
+        job.updatedAt = new Date().toISOString(); return { trackId: track.id };
+      }); send(res, 201, result); return;
+    }
+    send(res, 404, { error: '接口不存在' }); return;
+  }
 
   if (req.method === "OPTIONS" && (/^\/api\/public(?:\/|$)/.test(url.pathname) || url.pathname === "/embed/player.js")) {
     res.writeHead(204, publicCorsHeaders());
@@ -670,15 +764,19 @@ async function route(req, res) {
 
   if (url.pathname.startsWith("/music/")) {
     const safeName = path.basename(decodeURIComponent(url.pathname.replace("/music/", "")));
-    await serveAudio(req, res, path.join(MUSIC_DIR, safeName), publicCorsHeaders());
+    const draft = (await readTracks()).some(t => t.file === safeName && t.published === false);
+    if (draft && !requireAdmin(req, res)) return;
+    await serveAudio(req, res, path.join(MUSIC_DIR, safeName), draft ? { "cache-control": "private, no-store" } : publicCorsHeaders());
     return;
   }
 
   if (url.pathname.startsWith("/covers/")) {
     const safeName = path.basename(decodeURIComponent(url.pathname.replace("/covers/", "")));
+    const draft = (await readTracks()).some(t => t.coverFile === safeName && t.published === false);
+    if (draft && !requireAdmin(req, res)) return;
     const filePath = path.join(COVER_DIR, safeName);
     const contentType = mimeByExt.get(path.extname(filePath).toLowerCase()) || "image/jpeg";
-    serveFile(res, filePath, publicCorsHeaders({ "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" }));
+    serveFile(res, filePath, draft ? { "content-type": contentType, "cache-control": "private, no-store" } : publicCorsHeaders({ "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" }));
     return;
   }
 
@@ -710,13 +808,15 @@ async function route(req, res) {
   serveFile(res, filePath, { "content-type": contentType, "cache-control": cacheControl });
 }
 
-ensureStorage().then(() => {
-  http.createServer((req, res) => {
+ensureStorage().then(async () => {
+  await studio.init();
+  if (process.env.STUDIO_SCHEDULE !== 'off') studio.start();
+  const server = http.createServer((req, res) => {
     route(req, res).catch((error) => {
-      const status = error.message === "payload_too_large" ? 413 : 500;
+      const status = error.status || (error.message === "payload_too_large" ? 413 : 500);
       send(res, status, { error: error.message || "server_error" });
     });
   }).listen(PORT, HOST, () => {
-    console.log(`qiaomu music player listening on ${HOST}:${PORT}`);
+    console.log(`qiaomu music player listening on ${HOST}:${server.address().port}`);
   });
 });

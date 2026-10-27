@@ -11,5 +11,6 @@ services:
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before starting the admin server}"
       SESSION_SECRET: "${SESSION_SECRET:-}"
       MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-52428800}"
+      STUDIO_WORKER_TOKEN: "${STUDIO_WORKER_TOKEN:-}"
     volumes:
       - ./data:/data

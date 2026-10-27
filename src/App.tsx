@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, TouchEvent } from "react";
 import Coverflow from "react-coverflow";
+import Studio from './Studio';
 import {
   Check,
   ChevronLeft,
@@ -53,7 +54,7 @@ type Track = {
   coverUrl?: string;
 };
 
-type View = "home" | "discover" | "settings" | "admin";
+type View = "home" | "discover" | "settings" | "admin" | "studio";
 type Playlist = {
   id: string;
   name: string;
@@ -338,7 +339,7 @@ export default function App() {
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const energyRef = useRef(0);
   const lastVolumeRef = useRef(82);
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(window.location.pathname === '/studio' ? 'studio' : 'home');
   const [tracks, setTracks] = useState<Track[]>([]);
   const [adminTracks, setAdminTracks] = useState<Track[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -375,6 +376,7 @@ export default function App() {
 
   useEffect(() => {
     void loadTracks();
+    void checkLogin();
   }, []);
 
   useEffect(() => {
@@ -742,7 +744,7 @@ export default function App() {
         onPause={() => setIsPlaying(false)}
       />
 
-      <div className="app-shell grid h-screen grid-cols-[76px_minmax(0,1fr)] gap-3 p-3 max-lg:grid-cols-1">
+      <div className={`app-shell ${view === 'studio' ? 'studio-shell' : ''} grid h-screen grid-cols-[76px_minmax(0,1fr)] gap-3 p-3 max-lg:grid-cols-1`}>
         <SideRail
           view={view}
           onHomeClick={() => {
@@ -750,6 +752,7 @@ export default function App() {
             setActivePlaylistId("all");
           }}
           onDiscoverClick={() => setView("discover")}
+          onStudioClick={() => { pause(); setView('studio'); void checkLogin(); }}
           onSettingsClick={() => setView("settings")}
         />
 
@@ -889,6 +892,8 @@ export default function App() {
               }}
             />
           </main>
+        ) : view === "studio" ? (
+          <Studio admin={admin} onLogin={login} loginStatus={status} onPlay={pause} onPublished={() => { void loadTracks(); void loadAdminTracks(); }} />
         ) : view === "discover" ? (
           <DiscoverPanel
             tracks={tracks}
@@ -936,7 +941,7 @@ export default function App() {
           />
         )}
       </div>
-      <GlobalPlayerBar
+      {view !== 'studio' && <GlobalPlayerBar
         track={activeTrack}
         isPlaying={isPlaying}
         time={time}
@@ -956,7 +961,7 @@ export default function App() {
         }}
         onToggleMute={toggleMute}
         onVolumeChange={setVolume}
-      />
+      />}
     </div>
   );
 }
@@ -1049,11 +1054,13 @@ function SideRail({
   view,
   onHomeClick,
   onDiscoverClick,
+  onStudioClick,
   onSettingsClick
 }: {
   view: View;
   onHomeClick: () => void;
   onDiscoverClick: () => void;
+  onStudioClick: () => void;
   onSettingsClick: () => void;
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -1101,6 +1108,7 @@ function SideRail({
           <Compass size={19} />
           <span className="mobile-menu-text">发现</span>
         </button>
+        <button type="button" className={`settings-trigger ${view === 'studio' ? 'is-active' : ''}`} title="Suno 创作工作台" onClick={() => { onStudioClick(); closeMobileMenu(); }}><Sparkles size={19} /><span className="mobile-menu-text">创作</span></button>
         <button
           type="button"
           className={`settings-trigger side-settings ${view === "settings" ? "is-active" : ""}`}

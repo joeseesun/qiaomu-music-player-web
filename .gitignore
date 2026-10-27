@@ -9,6 +9,9 @@ dist/
 data/music/*
 data/covers/*
 data/tracks.json
+data/tracks.json.tmp
+data/studio.json*
+.qa/
 !data/music/.gitkeep
 !data/covers/.gitkeep
 
@@ -19,3 +22,5 @@ ios/**/xcuserdata/
 ios/**/DerivedData/
 ios/**/build/
 ios/**/screenshots/
+
+__pycache__/
