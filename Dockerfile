@@ -7,6 +7,7 @@ RUN npm ci --legacy-peer-deps
 
 COPY index.html vite.config.ts tsconfig.json postcss.config.cjs tailwind.config.cjs ./
 COPY server.js Dockerfile docker-compose.yml ./
+COPY lib lib
 COPY public public
 COPY src src
 COPY scripts scripts
@@ -18,6 +19,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY server.js server.js
+COPY lib lib
 COPY --from=build /app/dist dist
 
 RUN mkdir -p /data/music /data/covers && chown -R node:node /data
