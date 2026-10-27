@@ -48,3 +48,13 @@
 - 后续优先复用上述任务及已写方案，不重写歌词、不新建重复任务。若出现验证，让用户手动完成，再只检查已有结果；取得 ID 后恢复下载、字幕、封面和草稿试听。公开曲库仍保留 48 首。
 
 浏览器接续实测更新（2026-10-27）：用户交回 TaskSpace 83 后，用实际 helper 成功填写《雨越下越要跳》的歌词、风格、标题、排除风格，并核对 v6；提交意图落盘后仅点击一次 Create。截图确认 Cloudflare 真人验证框出现，已 handOff 等待用户完成；尚无新候选 ID。重复标题字段改为末个输入框，填表问题已复验通过。当前 17 项回归测试通过，结果恢复和上线回读待继续。
+
+上线回读（2026-10-27 12:40 CST）：
+
+- 修复 PR #5 已合并，main 提交 f551ec5；PR CI 通过。生产 server.js、lib/studio.js、dist/index.html 的 SHA256 与合并后本地构建逐一一致。
+- 生产服务 active，/health 200，匿名 /api/studio 401；新增 browser-check 对无效任务返回 409。原有公开曲库 trackCount=48，原先两个 review 任务各 2 首候选保留。
+- Pulse 的原任务已迁移为 browserPending=true，明确显示 Cloudflare 验证及结果检查按钮；未新建任务、未再次点击 Create。Night to Night 原任务仍 blocked，等待首个任务验证完成后继续核对恢复。
+- 本机两个脚本与仓库逐字一致，LaunchAgent PATH 已补 ~/.local/bin，已重新 bootstrap；生产收到 ready 心跳，消息为“等待你完成 Suno 网页操作，随后点击检查生成结果”。
+- 真实已有草稿：匿名音频/封面 401；登录音频 Range 206、32 字节，封面 200；两者 private,no-store。没有发布新的公开歌曲。
+- 备份 /opt/qiaomu-backups/music-browser-fix-20261027/before.tgz；本机旧 worker 和 plist 在 ~/Library/Logs/QiaomuMusicStudio/browser-fix-backup/。
+- 仍待用户完成 TaskSpace 83 / p1 的真人验证并交回控制；之后通过网站 browser-check 让已安装执行器仅取回结果，验收新歌下载和试听。当前无新歌 ID，不能把填表与点击成功写成歌曲生成成功。禁止重复 Create。TaskSpace 尚未 finish，因为已交给用户。
