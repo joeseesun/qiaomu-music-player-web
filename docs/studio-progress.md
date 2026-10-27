@@ -35,4 +35,4 @@
 
 最终候选验收：4 首音频已通过 ffprobe（206.36s, 202.0s, 194.24s, 198.0s），同步 LRC 均通过校验；4 个候选已上传到生产，两个任务均为 review。实际浏览器播放候选从 0 到 4.4 秒、总时长 198 秒，无播放器错误，随后暂停。公开曲库仍保持 48 首，等待用户选择发布。
 
-代理层验收发现并修复：旧 Nginx 在 HTTP/HTTPS 直接 alias 音频目录，绕过 Node 草稿鉴权。已备份到同目录 nginx-before.conf，移除两个直出 location；nginx -t 通过并 reload，音频改经现有应用代理。公网未登录 HTTP/HTTPS 草稿请求均 401，公开音频仍为 206。没有 CDN 缓存层（响应 Server: nginx）。
+代理层验收发现并修复：旧 Nginx 在 HTTP/HTTPS 直接 alias 音频目录，绕过 Node 草稿鉴权。已备份到同目录 nginx-before.conf，移除两个直出 location；nginx -t 通过并 reload，音频改经现有应用代理。公网未登录 HTTP/HTTPS 草稿请求均 401，公开音频仍为 206。公网响应未见 CDN 缓存头。进一步关闭该站继承的 Nginx proxy_cache，显式转发 Range / If-Range；登录状态实测草稿返回 206、32 字节、Cache-Control: private, no-store。
