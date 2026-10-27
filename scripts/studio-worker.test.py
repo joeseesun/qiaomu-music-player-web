@@ -30,6 +30,28 @@ class CommandFailureTests(unittest.TestCase):
         self.assertNotIn('secret-value', str(caught.exception))
 
 
+class BrowserResultTests(unittest.TestCase):
+    def test_native_ego_stderr_results_continue_download(self):
+        instance = worker.Worker.__new__(worker.Worker)
+        instance.progress = MagicMock()
+        ids = ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222']
+        result = subprocess.CompletedProcess(['ego-browser'], 0, '', '[ego-browser:notice] fixture\nQM_BROWSER_RESULT=' + json.dumps({'ids': ids}) + '\n')
+        with patch.object(worker.shutil, 'which', return_value='/fixture/ego-browser'), patch.object(worker.subprocess, 'run', return_value=result):
+            actual = instance.browser_submit({'id': 'fixture', 'lease': 'lease'}, Path('/fixture/job'), check=True)
+        self.assertEqual(actual, ids)
+        self.assertFalse(instance.progress.call_args.kwargs['browserPending'])
+
+    def test_native_ego_handoff_message_is_preserved(self):
+        instance = worker.Worker.__new__(worker.Worker)
+        instance.progress = MagicMock()
+        result = subprocess.CompletedProcess(['ego-browser'], 0, '', 'QM_BROWSER_RESULT=' + json.dumps({'pending': True, 'message': '发现多组同名结果，请关联候选链接'}) + '\n')
+        with patch.object(worker.shutil, 'which', return_value='/fixture/ego-browser'), patch.object(worker.subprocess, 'run', return_value=result):
+            with self.assertRaises(worker.Blocked) as caught:
+                instance.browser_submit({'id': 'fixture', 'lease': 'lease'}, Path('/fixture/job'), check=True)
+        self.assertIn('多组同名结果', str(caught.exception))
+        self.assertEqual(caught.exception.code, 'browser_action_required')
+
+
 class CoverRecoveryTests(unittest.TestCase):
     def test_inspected_local_cover_wins_without_network(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(worker.urllib.request, 'urlopen') as network:
