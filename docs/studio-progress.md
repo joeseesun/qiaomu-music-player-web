@@ -58,3 +58,12 @@
 - 真实已有草稿：匿名音频/封面 401；登录音频 Range 206、32 字节，封面 200；两者 private,no-store。没有发布新的公开歌曲。
 - 备份 /opt/qiaomu-backups/music-browser-fix-20261027/before.tgz；本机旧 worker 和 plist 在 ~/Library/Logs/QiaomuMusicStudio/browser-fix-backup/。
 - 仍待用户完成 TaskSpace 83 / p1 的真人验证并交回控制；之后通过网站 browser-check 让已安装执行器仅取回结果，验收新歌下载和试听。当前无新歌 ID，不能把填表与点击成功写成歌曲生成成功。禁止重复 Create。TaskSpace 尚未 finish，因为已交给用户。
+
+候选恢复完成（2026-10-27 12:55 CST）：
+
+- 用户完成验证后，Suno 实际出现《雨越下越要跳》两组共 4 首，时间分别为 04:39:18 UTC 与 04:50:25 UTC，歌词及风格均匹配。自动检查按设计拒绝自行关联多组结果；已将最早一组 66aa02d9-7c9b-40f2-973d-61639a7f3455、f28c0fd7-0ef1-42a0-96de-10e0ed8e5ae2 关联回原 Pulse 任务。另一组 cabf3bfe-6381-4744-8863-e011006c7297、1e9d52d0-7370-4495-a0d3-9ab2596570a5 保留在 Suno，未删除、未重复创建。
+- 发现真实 Ego Lite CLI 将 console 输出放在 stderr，旧 worker 仅解析 stdout，导致具体“多组同名结果”信息变为通用错误。PR #7 / main 7a0afc4 已合并并安装，改为提取两个流中明确的结果标记；19 项回归测试通过。已安装 worker + 真实 Ego CLI 用已确认 ID 走结果解析验证通过，没有创建或浏览器写操作。LaunchAgent 已重启并收到 ready 心跳。
+- Night to Night 的《静音外放》经 CLI 搜索确认不存在后，沿用原 request-id、歌词与风格成功生成一次，得到 02bdc008-a477-42a4-b3ae-1e2e9158b7e1、07e13b37-3406-488f-bd59-edd38db46569，并关联回原任务。没有新建重复工作台任务。
+- 两个原任务均为 review，各 2 首新候选；执行器完成下载、ffprobe、同步 LRC、Suno 封面和草稿上传。时长分别为《雨越下越要跳》205.52/191.20 秒，《静音外放》217.60/219.96 秒。
+- 真实网站分别点击两首候选 A，播放推进至 2 秒以上、duration 正确、audio.error=null，随后暂停。4 首新草稿登录 Range 均 206、32 字节、private,no-store，匿名均 401。公开曲库仍 48 首，尚未替用户选择公开版本。
+- 本次恢复额外更新了 canonical qiaomu-dev-skill/references/ship.md 的后台 CLI 输出流与安装后真实链路验收经验。Ego Lite 提示可升级，本次未升级。
