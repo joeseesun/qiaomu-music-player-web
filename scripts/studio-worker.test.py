@@ -1,12 +1,33 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import subprocess
+import json
 import unittest
 from unittest.mock import patch, MagicMock
 
 spec = importlib.util.spec_from_file_location('studio_worker', Path(__file__).with_name('studio-worker.py'))
 worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
+
+
+class CommandFailureTests(unittest.TestCase):
+    def test_suno_stderr_captcha_is_actionable_without_leaking_provider_output(self):
+        failure = subprocess.CompletedProcess(['suno'], 2, '', json.dumps({'status': 'error', 'error': {'code': 'captcha_required', 'message': 'private-provider-data'}}))
+        with patch.object(worker.subprocess, 'run', return_value=failure):
+            with self.assertRaises(worker.Blocked) as caught:
+                worker.command(['suno', '--no-browser', 'generate'])
+        self.assertEqual(caught.exception.code, 'captcha_required')
+        self.assertIn('人机验证', str(caught.exception))
+        self.assertNotIn('private-provider-data', str(caught.exception))
+
+    def test_unknown_failure_does_not_enable_browser_submission(self):
+        failure = subprocess.CompletedProcess(['suno'], 1, '', 'network failure secret-value')
+        with patch.object(worker.subprocess, 'run', return_value=failure):
+            with self.assertRaises(worker.Blocked) as caught:
+                worker.command(['suno'])
+        self.assertEqual(caught.exception.code, '')
+        self.assertNotIn('secret-value', str(caught.exception))
 
 
 class CoverRecoveryTests(unittest.TestCase):

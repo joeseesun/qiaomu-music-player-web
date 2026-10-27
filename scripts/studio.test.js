@@ -144,6 +144,23 @@ test("recover existing song IDs without creating a second generation request", a
   assert.deepEqual(next.songIds, [B]);
   assert.notEqual(next.lease, j.lease);
 });
+test('browser handoff stops the queue until explicit result check and keeps the same job', async t => {
+  const s = await fixture(t);
+  await s.sync();
+  await s.createJob({ trackId: A, brief: 'first' });
+  const first = await s.claim({ ready: true });
+  await assert.rejects(s.checkBrowser(first.id), /没有/);
+  await s.progress(first.id, { lease: first.lease, generationStarted: true, browserPending: true, status: 'blocked', errorCode: 'browser_action_required' });
+  const second = await s.createJob({ trackId: A, brief: 'second' });
+  assert.equal(await s.claim({ ready: true }), null);
+  await assert.rejects(s.resume(first.id), /重复扣费/);
+  await s.checkBrowser(first.id);
+  const resumed = await s.claim({ ready: true });
+  assert.equal(resumed.id, first.id);
+  assert.equal(resumed.browserAction, 'check');
+  await s.progress(resumed.id, { lease: resumed.lease, songIds: [B], browserPending: false, status: 'blocked' });
+  assert.equal((await s.claim({ ready: true })).id, second.id);
+});
 test("attach recovered Suno links only to blocked planned jobs", async (t) => {
   const s = await fixture(t);
   await s.sync();

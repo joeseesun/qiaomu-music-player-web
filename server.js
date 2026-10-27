@@ -590,6 +590,8 @@ async function route(req, res) {
     if (resume && req.method === 'POST') { send(res, 200, await studio.resume(resume[1])); return; }
     const attach = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/attach$/.exec(url.pathname);
     if (attach && req.method === 'POST') { send(res, 200, await studio.attach(attach[1], (await readJson(req)).links)); return; }
+    const browserCheck = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/browser-check$/.exec(url.pathname);
+    if (browserCheck && req.method === 'POST') { send(res, 200, await studio.checkBrowser(browserCheck[1])); return; }
     const publish = /^\/api\/studio\/jobs\/([a-f0-9-]{36})\/publish$/.exec(url.pathname);
     if (publish && req.method === 'POST') {
       const body = await readJson(req);

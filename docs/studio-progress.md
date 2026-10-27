@@ -36,3 +36,15 @@
 最终候选验收：4 首音频已通过 ffprobe（206.36s, 202.0s, 194.24s, 198.0s），同步 LRC 均通过校验；4 个候选已上传到生产，两个任务均为 review。实际浏览器播放候选从 0 到 4.4 秒、总时长 198 秒，无播放器错误，随后暂停。公开曲库仍保持 48 首，等待用户选择发布。
 
 代理层验收发现并修复：旧 Nginx 在 HTTP/HTTPS 直接 alias 音频目录，绕过 Node 草稿鉴权。已备份到同目录 nginx-before.conf，移除两个直出 location；nginx -t 通过并 reload，音频改经现有应用代理。公网未登录 HTTP/HTTPS 草稿请求均 401，公开音频仍为 206。公网响应未见 CDN 缓存头。进一步关闭该站继承的 Nginx proxy_cache，显式转发 Range / If-Range；登录状态实测草稿返回 206、32 字节、Cache-Control: private, no-store。
+
+回归修复进行中（2026-10-27，分支 fix/suno-browser-continuation）：
+
+- 用户点击 Pulse / Night to Night 的两个任务分别为 ea9bf971-fd8c-4e29-9eb7-00e0eafd7fe9、dbab11e2-4457-4e99-9115-44a7cde2f797；已有《雨越下越要跳》《静音外放》方案，但没有歌曲 ID。Suno 曲库读取未发现这两个标题。
+- 原因：CLI 的结构化错误写 stderr，旧 worker 只看 stdout，因此隐藏了 captcha_required。对第一个任务用同一 request-id 做一次有界检查，确认在生成提交前就返回 captcha_required；没有重复创建。第二个任务尚未单独重试。
+- 修复代码已完成：识别 stderr 错误；仅在已知提交前验证阻断时接到可见 Ego Lite；自动填表，记录提交意图后最多点击一次 Create；遇到人工操作停止队列；网站新增明确交回控制的“检查生成结果”，该操作绝不点击 Create。
+- 当前 12 项 Node + 5 项 Python 测试、TypeScript/语法检查和构建通过；实际填表首次尝试在提交前停止，已修正重复标题输入框的选取和校验，但尚未完成实机复验。不能报告已修好或已上线。
+- Ego TaskSpace 83 / p1 当前已 handOff，等待用户明确“继续自动检查”后才能 takeOverTaskSpace(83)。不要新开空间绕过。第一页已填歌词与风格，没有点击创建；本地 browser-state.json phase=opened。重新生成 .qa/browser-submit-check.js 后再试，它目前仍是旧 helper 内容。
+- 当前修复未提交、未部署。生产和 LaunchAgent 仍为旧版，两个失败任务保持 blocked。确认真实浏览器续接后再提交 PR、合并、部署，并把 studio-worker.py 与新增 studio-browser.js 一起安装到 ~/.local/share/qiaomu-music-studio/。
+- 后续优先复用上述任务及已写方案，不重写歌词、不新建重复任务。若出现验证，让用户手动完成，再只检查已有结果；取得 ID 后恢复下载、字幕、封面和草稿试听。公开曲库仍保留 48 首。
+
+浏览器接续实测更新（2026-10-27）：用户交回 TaskSpace 83 后，用实际 helper 成功填写《雨越下越要跳》的歌词、风格、标题、排除风格，并核对 v6；提交意图落盘后仅点击一次 Create。截图确认 Cloudflare 真人验证框出现，已 handOff 等待用户完成；尚无新候选 ID。重复标题字段改为末个输入框，填表问题已复验通过。当前 17 项回归测试通过，结果恢复和上线回读待继续。
