@@ -87,3 +87,11 @@
 
 - 用户英文歌截图暴露出另一处解析问题：Suno 的逐词时间戳被当成显示行，原始 LRC 的空行才对应歌词行边界。现在识别逐词/片段对齐格式，按原始空行合并，保留每句首个唱词时间；普通整句 LRC、多时间戳和纯文本仍保留原换行。原始歌词数据不改写。
 - 《Moon Gate, Half Past Nine · B》真实 LRC 恢复为 59 行，例如 “I check the clock, it's half past nine”；本地真实浏览器点击该整句准确定位 44.52 秒。中文碎片与跨行括号、重复歌词也有回归测试，当前共 29 项测试、类型检查和构建通过。嵌入播放器共享解析器版本更新为 v2。
+
+## 2026-10-29 创作方案截断排障
+
+- 任务 b369c3ac-7df9-4c8a-91d8-88784eb1cdd3（I decide，英文、增强律动）在提交 Suno 前 blocked；生产无 generationStarted/songIds，本地无提交 intent。
+- 同一请求复现 finish_reason=length：5000 completion tokens，其中 4071 reasoning tokens；content 3293 字符，JSON 不完整。根因是 worker 未显式关闭 Flash 思考，思考耗掉输出预算。
+- worker 对 Flash 显式发送 thinking.type=disabled；记录仅含模型、结束原因、字数与 usage 的本地诊断；截断、拒绝与空响应分开报错，不向网页泄漏模型原文。
+- 同任务真实修后请求 finish_reason=stop，reasoning_chars=0，801 completion tokens；生成 Pulse on the Floor（英文歌词1574字符、style230字符）。保持 audioAnalyzed=false，未冒充音频分析。
+- 32 项回归通过（22 Node + 10 Python）。计划只安装本机 worker，复用原任务与已验证方案恢复，不增加工作台任务、不自动发布候选。后续生成/安装/远端证据另行补记。

@@ -30,6 +30,40 @@ class CommandFailureTests(unittest.TestCase):
         self.assertNotIn('secret-value', str(caught.exception))
 
 
+class ModelResponseTests(unittest.TestCase):
+    def invoke(self, response, diagnostics=None):
+        client = MagicMock()
+        client.get_provider.return_value = {'default_model': 'deepseek/deepseek-flash'}
+        client.request_json.return_value = response
+        with patch.object(worker, 'llm_client', return_value=client):
+            value = worker.model_call('magpie-openai', [], diagnostics=diagnostics)
+        return value, client.request_json.call_args.args[3]
+
+    def test_flash_explicitly_disables_thinking(self):
+        value, payload = self.invoke({'choices': [{'message': {'content': '{"title":"fixture"}'}, 'finish_reason': 'stop'}]})
+        self.assertEqual(value, '{"title":"fixture"}')
+        self.assertEqual(payload['thinking'], {'type': 'disabled'})
+
+    def test_truncation_is_distinct_and_records_safe_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostic = Path(directory) / 'response.json'
+            with self.assertRaises(worker.Blocked) as caught:
+                self.invoke({'choices': [{'message': {'content': '{"lyrics":', 'reasoning_content': 'private reasoning'}, 'finish_reason': 'length'}], 'usage': {'completion_tokens': 5000, 'completion_tokens_details': {'reasoning_tokens': 4071}}}, diagnostic)
+            self.assertEqual(caught.exception.code, 'model_truncated')
+            saved = json.loads(diagnostic.read_text())
+            self.assertEqual(saved['finish_reason'], 'length')
+            self.assertEqual(saved['usage']['completion_tokens_details']['reasoning_tokens'], 4071)
+            self.assertNotIn('private reasoning', diagnostic.read_text())
+            self.assertNotIn('lyrics', diagnostic.read_text())
+
+    def test_empty_and_refused_responses_are_distinct(self):
+        for choice, code in [({'message': {'content': ''}, 'finish_reason': 'stop'}, 'model_empty'), ({'message': {'content': '', 'refusal': 'private refusal'}, 'finish_reason': 'content_filter'}, 'model_refused')]:
+            with self.subTest(code=code):
+                with self.assertRaises(worker.Blocked) as caught:
+                    self.invoke({'choices': [choice]})
+                self.assertEqual(caught.exception.code, code)
+
+
 class BrowserResultTests(unittest.TestCase):
     def test_native_ego_stderr_results_continue_download(self):
         instance = worker.Worker.__new__(worker.Worker)
