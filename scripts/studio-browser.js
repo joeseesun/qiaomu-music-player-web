@@ -35,14 +35,14 @@ try {
     page = task.page(state.page || 'p1');
     if (!input.check && state.phase !== 'submitted') {
       await page.goto('https://suno.com/create');
-      await page.waitForSelector('loc=role:tab[name="Advanced"]', { timeout: 20000 });
+      await page.waitForSelector('button[role="tab"]:text-is("Advanced")', { timeout: 20000 });
       await page.snapshot();
-      await page.click('loc=role:tab[name="Advanced"]');
+      await page.click('button[role="tab"]:text-is("Advanced")');
       await page.waitForSelector('[aria-label="Lyrics editor"]', { timeout: 15000 });
       state.baseline = await page.evaluate(() => [...document.querySelectorAll('a[href^="/song/"]')].map(a => a.getAttribute('href').split('/')[2]?.split('?')[0]).filter(Boolean));
       await saveState();
-      const validModel = await page.evaluate(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'v6'));
-      if (!validModel) throw Error('model_selection_required');
+      // The form can mount before the selected model finishes loading.
+      await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'v6'), undefined, { timeout: 15000 });
       await page.fill('[aria-label="Lyrics editor"]', plan.lyrics);
       await page.fill('textarea[maxlength="1000"]:not([aria-label])', plan.style);
       await page.fill('input[placeholder="Song Title (Optional)"] >> nth=-1', plan.title);

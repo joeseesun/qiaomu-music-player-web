@@ -50,3 +50,19 @@ test('persisted IDs are reused without opening or reclaiming a browser', async t
   await run({ folder, check: true }, () => assert.fail(), () => assert.fail(), { log: v => reports.push(v) });
   assert.deepEqual(JSON.parse(reports[0].split('=')[1]).ids, ids);
 });
+
+test('Advanced tab uses exact visible text when its accessible name is absent', async t => {
+  const { folder, run } = await fixture(t, { spaceId: 101, phase: 'opened' });
+  await fs.writeFile(path.join(folder, 'plan.json'), JSON.stringify({ title: 'Test song', lyrics: '[Verse]\nNew lyrics', style: 'dance-pop' }));
+  const ids = ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'];
+  const reports = [], clicks = [], values = [[], false, true, ids];
+  const page = { goto: async () => {}, snapshot: async () => {},
+    waitForSelector: async selector => {
+      if (selector.includes('Advanced')) assert.equal(selector, 'button[role="tab"]:text-is("Advanced")');
+    }, click: async selector => { clicks.push(selector); }, fill: async () => {},
+    evaluate: async () => values.shift(), waitForFunction: async () => {}, screenshot: async () => {} };
+  await run({ folder, check: false }, async () => ({ page: () => page }), () => assert.fail(), { log: v => reports.push(v) });
+  assert.deepEqual(JSON.parse(reports[0].split('=')[1]).ids, ids);
+  assert.equal(clicks.filter(s => s === '[aria-label="Create song"]').length, 1);
+  assert.ok(clicks.includes('button[role="tab"]:text-is("Advanced")'));
+});

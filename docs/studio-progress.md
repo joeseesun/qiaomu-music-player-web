@@ -95,3 +95,7 @@
 - worker 对 Flash 显式发送 thinking.type=disabled；记录仅含模型、结束原因、字数与 usage 的本地诊断；截断、拒绝与空响应分开报错，不向网页泄漏模型原文。
 - 同任务真实修后请求 finish_reason=stop，reasoning_chars=0，801 completion tokens；生成 Pulse on the Floor（英文歌词1574字符、style230字符）。保持 audioAnalyzed=false，未冒充音频分析。
 - 32 项回归通过（22 Node + 10 Python）。计划只安装本机 worker，复用原任务与已验证方案恢复，不增加工作台任务、不自动发布候选。后续生成/安装/远端证据另行补记。
+- 安装后的 worker 与源码逐字一致，LaunchAgent 已重启；通过服务器鉴权 resume API 恢复原任务。模型修复提交 ff35725 已推送 main，GitHub run 40901653294 全通过。
+- 后续真实浏览器暴露 Suno Advanced tab 的 role/name 定位失败（快照中 tab 没有名称、可见子文本为 Advanced）；改用 role+精确文本定位，已在真实页面验证成功。表单挂载早于 v6 模型就绪，改为等待模型状态，避免立即误报。新增完整填写路径回归；当前 33 项测试。
+- 修后的已安装 browser 脚本实际完成歌词/风格/标题填写、回读校验，并仅点击一次 Create，submittedAt=2026-10-29T15:28:48.040Z；截图明确是 Cloudflare 真人验证。TaskSpace 101/p1 已 handOff，不解验证码，不再次 Create。等待用户完成后在工作台点击“检查生成结果”。当前无歌曲 ID，未声称生成、下载、试听或发布完成。
+- 本次站点前后端未改；只更新已安装本机 worker/browser。33 项测试与 npm run check 通过；npm run build 在模型修复后通过（后续仅 browser 定位与等待逻辑变更）。Ego Lite 提示可更新，本次未升级。
